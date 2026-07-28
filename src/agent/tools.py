@@ -24,6 +24,11 @@ def query_sop(question: str) -> dict:
                 "section_number": s.section_number,
                 "title": s.title,
                 "content": s.content,
+                "relevance_score": s.relevance_score,
+                # [2026-07-28再更正：回應Kiro審查] 原本這裡漏掉 relevance_score，
+                # 但 format_response() 組 SopEvidence 時這個欄位是必填——
+                # local_fallback.py 用命中率算、bedrock_kb.py 用KB回傳的score，
+                # 兩條路徑都有值，只是這個工具包裝函式沒有把它傳出去，已修正。
             }
             for s in result.sections
         ],
@@ -42,20 +47,25 @@ def simulate_scenario(assumptions: dict, question: str) -> dict:
             {"BS_MRT_BL17.User_Count": 40000, "RD_TPE_002.status": "Closed"}
         question: 使用者原始問題（供理解上下文）
 
-    [2026-07-28總架構師補充] 呼叫 `src/whatif_engine.run_scenario()`——那裡把
-    apply_scenario_overrides + 既有的 evaluate_rules/plan_route/calculate_ete
-    串起來，不經過 orchestrator.py（避免 Orchestrator→W1→Orchestrator 循環依賴），
-    也不在 routing.py/rules.py/reporting.py 裡另開一套「_with_overrides」版本。
+    [2026-07-28總架構師補充：回應Kiro審查，定案] 呼叫 `src/whatif_engine.run_scenario()`
+    ——那裡把 apply_scenario_overrides + 既有的 evaluate_rules/plan_route/calculate_ete
+    串起來，不經過 orchestrator.py 的函式本身（避免 Orchestrator→W1→Orchestrator
+    循環依賴），但經由 `orchestrator.GATEWAY` 存取。
 
-    incident/bundle 目前哪裡來還沒定案（需要目前作用中的事件與 as-of 快照）——
-    TODO(Kiro): 從 W2Context 或 orchestrator 的 GlobalState 取得目前作用中的
-    incident 與 bundle，這裡先假設有一個 `get_current_context()` 可用。
+    `_get_current_context()`：透過 `orchestrator._current_trace_ctx`（一個
+    `contextvars.ContextVar`，由 `handle_user_query()` 在轉發給 W1 之前設定）
+    取得目前的 trace_id，再查 `orchestrator.GATEWAY.get_global_state()` 的
+    `active_incidents` 找對應的 `IncidentRecord`。trace_id 為 None（使用者沒有
+    正在查看特定事件、但問題仍含前瞻假設詞）是合理情境，這時只能做不依賴特定
+    事件的模擬（incident=None，evaluate_rules 可以接受，但 plan_routes/calculate_ete
+    需要 incident，`run_scenario` 遇到 incident=None 時應該只填 rule_hits，
+    route_plan/ete 留 null）。
     """
     try:
         from src import orchestrator
         from src.whatif_engine import run_scenario
 
-        incident, bundle = _get_current_context()  # TODO(Kiro): 見本函式 docstring
+        incident, bundle = _get_current_context()
         return run_scenario(bundle, incident, assumptions, orchestrator.GATEWAY)
     except Exception as exc:  # noqa: BLE001 - 保底模式，任何失敗都要能降級不中斷對話
         return {
@@ -66,8 +76,25 @@ def simulate_scenario(assumptions: dict, question: str) -> dict:
 
 
 def _get_current_context():
-    """TODO(Kiro): 回傳 (目前作用中的 Incident, 目前的 NormalizedDataBundle)。
-    來源待定——最可能是 orchestrator.get_global_state() 或最近一次
-    handle_incident() 的快取結果，需要在實作階段確認。
+    """回傳 (目前作用中的 Incident | None, 目前的 NormalizedDataBundle)。
+
+    見 `simulate_scenario` docstring 對 trace_id 為 None 情境的說明。
     """
-    raise NotImplementedError("見 simulate_scenario docstring")
+    from src import orchestrator
+
+    trace_id = orchestrator._current_trace_ctx.get()
+    state = orchestrator.get_global_state()
+
+    incident = None
+    bundle = None
+    if trace_id is not None:
+        for record in state.active_incidents.values():
+            if record.trace_id == trace_id:
+                incident = record.incident
+                bundle = record.bundle_snapshot
+                break
+
+    if bundle is None:
+        bundle = orchestrator.GATEWAY.load_data()
+
+    return incident, bundle

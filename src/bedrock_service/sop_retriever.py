@@ -11,14 +11,14 @@ from dataclasses import dataclass
 
 from src.bedrock_service.bedrock_kb import query_bedrock_kb
 from src.bedrock_service.local_fallback import query_local
-from src.bedrock_service.sop_data import SopSection
+from src.bedrock_service.sop_data import SopMatch
 
 USE_BEDROCK = os.getenv("USE_BEDROCK", "true").lower() == "true"
 
 
 @dataclass
 class SopQueryResult:
-    sections: list[SopSection]
+    sections: list[SopMatch]
     query: str
     retrieval_source: str
     """"bedrock" / "local" / "local_fallback"；欄位名對齊 00-tech-stack.md §6，

@@ -7,10 +7,10 @@
 
 from __future__ import annotations
 
-from src.bedrock_service.sop_data import SopSection
+from src.bedrock_service.sop_data import SopMatch
 
 
-def query_bedrock_kb(question: str) -> list[SopSection]:
+def query_bedrock_kb(question: str) -> list[SopMatch]:
     """呼叫 Bedrock KB Retrieve API，並用回傳結果辨識 section_number 後，
     從本機 SOP_DATA 取完整原文——KB 回傳的 text 可能被 chunking 切斷，
     不得直接拿來當 content（design.md 第三節「重要細節」）。

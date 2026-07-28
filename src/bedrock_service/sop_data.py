@@ -17,6 +17,22 @@ class SopSection:
     content: str
 
 
+@dataclass
+class SopMatch:
+    """一次查詢命中的結果。[2026-07-28總架構師補充：回應Kiro審查] 跟 `SopSection`
+    分開——`SopSection` 是「儲存的原文」，沒有 relevance_score（分數是「這次查詢」
+    跟「某章節」的關係，不是章節本身的屬性）。定義在這裡（而不是 `sop_retriever.py`）
+    是為了讓 `local_fallback.py`/`bedrock_kb.py`/`sop_retriever.py` 都能 import
+    同一個型別，不會互相循環依賴——這個檔案是套件裡最底層、不 import 同套件其他模組的
+    唯一檔案。
+    """
+
+    section_number: int
+    title: str
+    content: str
+    relevance_score: float
+
+
 def load_sop_data() -> dict[int, SopSection]:
     """系統啟動時載入 data/emergency_traffic_sop.json，key 為 section_number。
 

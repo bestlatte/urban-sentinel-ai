@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import contextvars
 import os
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from src.models import (
@@ -24,9 +26,7 @@ from src.models import (
     NormalizedDataBundle,
     RoutePlan,
     RouteRequest,
-    ScenarioOverrides,
     SensingResult,
-    WhatIfResult,
 )
 
 
@@ -63,18 +63,39 @@ class ModuleGateway(Protocol):
         ete: EteEstimate,
     ) -> BedrockAdvisory: ...
 
-    def parse_whatif(self, question: str) -> ScenarioOverrides: ...
-
-    def narrate_whatif(self, question: str, result_facts: WhatIfResult) -> tuple[str, list]: ...
+    # [2026-07-28總架構師補充：回應Kiro審查] 原本這裡還有 parse_whatif(question)/
+    # narrate_whatif(question, result_facts) 兩個方法，對應 m5-api-orchestrator-dashboard/
+    # design.md 設想的「LLM解析→Python重算→LLM敘述」三段式 What-if 流程。但 W1 實際
+    # 定案的設計（W1-whatif-agent/design.md）是 Strands Agent 用 @tool 機制，LLM 在
+    # 一次 Agent 呼叫內部自己決定要不要 call `query_sop`/`simulate_scenario`，「解析
+    # 參數」跟「敘述結果」都內含在同一次 Agent 對話裡，不是外部呼叫端分兩次呼叫 LLM。
+    # 這兩個方法從沒被任何程式碼呼叫過——是兩個獨立撰寫的 spec 對同一件事給了不同
+    # 實作方式，W1 那邊的設計後來居上且已經全面鷹架，這裡確認以 W1 的方式為準，
+    # 移除這兩個未使用的 Protocol 方法，不要實作它們。
 
 
 class StubGateway:
     """開發初期用假資料回傳，事件相關欄位取自 available_incidents 的三筆 ID。
     不讀 data/**（那是 M1 的權限）。每次呼叫都要在 Envelope warnings 留下
     "module_stub_in_use:<module>"。
+
+    [2026-07-28總架構師補充：回應Kiro審查——固定用 ACC_001 黃金情境反推假資料，
+    不要自己編一組跟黃金值對不上的數字，這樣 Stub 模式下手動測試也能對答案]：
+        load_data()      → 只需含 ACC_001 這筆 incident 的最小 bundle 即可
+        evaluate_rules() → SensingResult(traffic_level="A", rule_hits=[命中SOP-2的
+                            RuleHit], as_of=incident.timestamp)
+        plan_routes()    → RoutePlan(primary=RD_TPE_004, secondary=RD_TPE_005,
+                            excluded=[RD_TPE_006, RD_TPE_008]的假RouteCandidate)
+        calculate_ete()  → EteEstimate(minutes=90, recovery_at="2026-05-20 23:40",
+                            formula="60 + max(0,(1.0-0.5)*60) = 90", base_clearance=60,
+                            average_saturation=1.0) —— 這組數字就是黃金驗收值本身，
+                            Stub 模式下也應該要能通過 tests/test_orchestrator.py 的
+                            test_acc001_golden_regression_full_pipeline
+        generate_report()→ 回傳固定字串 + Notification(zh="...", en=None)
+        run_agent()      → BedrockAdvisory(text="...", sop_evidence=[至少一筆假SopEvidence])
     """
 
-    # TODO(Kiro): 依 m5-api-orchestrator-dashboard/design.md 第2節實作全部方法。
+    # TODO(Kiro): 依上述固定值實作全部方法。
 
 
 class LiveGateway:
@@ -133,12 +154,53 @@ def classify_incident(incident: Incident) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# GlobalState（SPEC-O1 §3，[2026-07-28總架構師補充：回應Kiro審查] 原文件只給了
+# 型別骨架沒給 IncidentRecord 的精確欄位，這裡補齊）
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IncidentRecord:
+    """GlobalState.active_incidents 的 value 型別。"""
+
+    trace_id: str
+    incident: Incident
+    decision_result: DecisionResult | None = None
+    """七階段跑完（PUSH）後才有值；PLAN/EXECUTE 中間階段為 None。"""
+    bundle_snapshot: NormalizedDataBundle | None = None
+    """OPEN 當下的 as-of bundle 快照，供 What-if 分支重算時取用（見 simulate_scenario）。"""
+
+
+@dataclass
+class GlobalState:
+    multilingual: bool = False
+    active_incidents: dict[str, IncidentRecord] = field(default_factory=dict)
+    """key=event_id。寫入：週期 PUSH 階段；移除：收到恢復訊號（Partial_Open等）。"""
+    cycle_counter: int = 0
+    """trace_id 流水號（行程內）。"""
+
+
+_STATE = GlobalState()
+
+
+# ---------------------------------------------------------------------------
 # A2：編排（折衷制——規則觸發=靜態分派表，事件注入=LLM規劃器+降級保底）
 # ---------------------------------------------------------------------------
 
 
 def handle_trigger_batch(batch: list[dict]) -> DecisionResult:
     """規則引擎呼叫入口。批次空陣列拋 ValueError（fail fast）。
+
+    [2026-07-28總架構師補充：回應Kiro審查——這個函式的呼叫端]這是唯一一個
+    API表面上沒有對應REST端點的入口，因為它的觸發來源是「規則引擎每個tick產出
+    的TriggeredRule[]」（SPEC-O1表格），不是使用者操作。呼叫端是 `main.py` 啟動時
+    註冊的一個背景排程任務（FastAPI `@app.on_event("startup")` 或 `asyncio.create_task`），
+    定期（demo資料時間跨度短，建議每次啟動時跑一次全量評估即可，不需要真的每15分鐘
+    輪詢；如果要做成真的定時器，週期抓 `.kiro/steering/00-tech-stack.md`
+    沒有規定，可以設一個常數，如 60 秒方便demo時展示效果）呼叫 `GATEWAY.evaluate_rules()`
+    掃全部15路段，比對上一次結果找出新的 rule_hits（尤其 B/A 級轉換），組成
+    TriggeredRule[] 傳進來。這個排程任務屬於 Phase 9（main.py），不是這個函式自己
+    要處理「誰呼叫我」，但補在這裡讓實作時知道不用等一個不存在的REST端點。
 
     TODO(Kiro): 依 SPEC-O2 §2 靜態分派表實作 §1-§6 各條規則對應的任務鏈；
     §4 自動連動§3、[§1-A,§4]合併等細節見 SPEC-O2 §2.1/2.2。
@@ -159,6 +221,12 @@ def handle_incident(event: Incident) -> DecisionResult:
     TODO(Kiro): 依 SPEC-O1 七階段生命週期（OPEN→FLAGS→PLAN→EXECUTE→SUMMARY→
     EXPLAIN→PUSH）+ SPEC-O2 §3 事件注入流程（LLM規劃器，三層護欄，失敗降級靜態鏈）實作。
     同上，全部經由 `GATEWAY` 存取，不直接 import M1/M2/M4 的模組。
+
+    OPEN 階段建立 `IncidentRecord(trace_id, incident=event, bundle_snapshot=GATEWAY.load_data())`
+    寫入 `_STATE.active_incidents[event.event_id]`；PUSH 階段補上 `decision_result`。
+    這是 Kiro 審查抓到的 `_get_current_context()` 缺口的另一半——W1 simulate_scenario
+    透過 `_current_trace_ctx`（見下方 `handle_user_query`）取得 trace_id 後，
+    從這裡的 `_STATE.active_incidents` 查對應的 incident/bundle_snapshot。
     """
     if not event.event_id or not event.affected_segment:
         raise ValueError("event_id / affected_segment 缺漏")
@@ -167,6 +235,25 @@ def handle_incident(event: Incident) -> DecisionResult:
 
 _FORWARD_LOOKING_WORDS = ("如果", "假設", "若", "會怎樣", "怎麼辦")
 """SPEC-O3 §4：問題含任一詞即走前瞻假設分支，優先序高於回溯追問。"""
+
+_current_trace_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_trace_id", default=None
+)
+"""[2026-07-28總架構師補充：回應Kiro審查——解決 _get_current_context() 缺口]
+
+Strands `@tool` 裝飾的函式（`agent/tools.py` 的 `simulate_scenario`）是被 LLM
+呼叫、參數由 LLM 決定，沒辦法讓呼叫端顯式傳入 trace_id/session_id 這種請求範疇的
+上下文。標準做法是用 `contextvars.ContextVar` 在請求進來時（這裡）設定一次，
+工具函式內部讀取，不需要改 LLM 的 tool-calling 介面。`handle_user_query()` 收到
+`current_trace_id` 後在呼叫 W1 之前先設定這個變數；`simulate_scenario` 讀
+`_current_trace_ctx.get()` 拿到 trace_id 後查 `_STATE.active_incidents[?]`
+（用 trace_id 找對應 event_id 需要一次反查，或乾脆讓 IncidentRecord 用 trace_id
+當 key——這個選擇留給 Kiro 實作時二選一，兩者都合理，不影響其他介面）。
+
+若 `current_trace_id` 為 None（使用者沒有正在查看特定事件、但問題仍含前瞻假設詞），
+`simulate_scenario` 應該只能做「不依賴特定事件」的模擬（例如只重算 `evaluate_rules`
+不含 `incident`，略過需要 incident 的路網/ETE 部分），這是合理的功能邊界，不是bug。
+"""
 
 
 def handle_user_query(question: str, current_trace_id: str | None, session_id: str, correlation_id: str) -> dict:
@@ -179,6 +266,7 @@ def handle_user_query(question: str, current_trace_id: str | None, session_id: s
     from src.decision_trace import answer_trace_query
 
     if any(word in question for word in _FORWARD_LOOKING_WORDS):
+        _current_trace_ctx.set(current_trace_id)
         result = process_whatif_request(session_id=session_id, content=question)
         return {"message_type": "whatif.evaluated.v1", "payload": result}
 
@@ -198,11 +286,14 @@ def handle_user_query(question: str, current_trace_id: str | None, session_id: s
     }
 
 
-def get_global_state() -> dict:
-    """測試與 demo 重播輔助。"""
-    raise NotImplementedError("見 SPEC-O1 §3 GlobalState")
+def get_global_state() -> GlobalState:
+    """測試與 demo 重播輔助。[2026-07-28總架構師補充] 直接回傳 `_STATE`
+    （已定義為模組層級的 `GlobalState` dataclass，見本檔上方），不是空字典。
+    """
+    return _STATE
 
 
 def reset() -> None:
-    """測試與 demo 重播輔助。"""
-    raise NotImplementedError("見 SPEC-O1 §3 GlobalState")
+    """測試與 demo 重播輔助：清空 `_STATE`，回到跟行程剛啟動時一樣的狀態。"""
+    global _STATE
+    _STATE = GlobalState()

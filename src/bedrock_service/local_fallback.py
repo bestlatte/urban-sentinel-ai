@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from src.bedrock_service.sop_data import SopSection
+from src.bedrock_service.sop_data import SopMatch
 
 KEYWORD_MAP: dict[int, list[str]] = {
     1: ["飽和", "擁塞", "A級", "B級", "紅燈", "黃燈", "級別", "Saturation"],
@@ -21,7 +21,7 @@ KEYWORD_MAP: dict[int, list[str]] = {
 RELEVANCE_THRESHOLD = 0.3
 
 
-def query_local(question: str) -> list[SopSection]:
+def query_local(question: str) -> list[SopMatch]:
     """關鍵字命中比對，取前 3、過濾低於 RELEVANCE_THRESHOLD 的。
 
     TODO(Kiro): 依 design.md 第四節「比對邏輯」實作：
