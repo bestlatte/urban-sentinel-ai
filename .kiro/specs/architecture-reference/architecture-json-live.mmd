@@ -1,0 +1,136 @@
+flowchart TB
+    subgraph LG["📌 圖例 · 顏色=命題模組　｜　本圖為新版五 JSON + REST/WebSocket 實作版"]
+        direction LR
+        LG1["模組1 監測儀表板"]:::m1
+        LG2["模組2 事件處置"]:::m2
+        LG3["模組3 對話諮詢"]:::m3
+        LG4["模組4 推理解釋"]:::m4
+        LG5["模組5 多語通報"]:::m5
+        LG0["共用 / 基礎設施"]:::shared
+    end
+
+    subgraph SRC["🗂️ 資料來源 · data/ 五個 canonical JSON"]
+        direction TB
+        J1[("city_traffic_flow.json<br/>112 筆車流 · provided")]
+        J2[("signaling_crowd_density.csv<br/>36 筆 · 9 站 · 真實資料(2026-07-28再更正:原37筆為wc -l誤把標題列算入) → provided")]
+        J3[("road_network_topology.json<br/>15 路段拓樸 · provided")]
+        J4[("live_incidents.json<br/>3 筆事件 · provided")]
+        J5[("emergency_traffic_sop.json<br/>7 sections · provided")]
+    end
+
+    subgraph FE["🖥️ 前端 Dashboard · HTML/CSS/JS + Fetch REST + WebSocket"]
+        direction TB
+        F1["【F1】車流/人流時序圖<br/>▸ 模組1"]
+        F2["【F2】異常警示彈窗<br/>▸ 模組1"]
+        F3["【F3】事件注入面板<br/>▸ 模組2"]
+        F4["【F4】SVG 路網拓樸圖<br/>展示座標 ▸ 模組2·4"]
+        F5["【F5】建議書/簡訊卡片<br/>▸ 模組5"]
+        F6["【F6】What-if 對話視窗<br/>▸ 模組3"]
+        F7["【F7】決策依據與工具軌跡<br/>▸ 模組4"]
+        FWS["【FWS】WebSocket Client<br/>接收推播·斷線退回輪詢<br/>▹ 共用"]
+    end
+
+    API["【API】FastAPI 單一 Server<br/>REST /api/* + WebSocket /ws + 靜態檔<br/>▹ 共用"]
+
+    subgraph BE["⚙️ 後端 Python · 決定性工具"]
+        direction TB
+        subgraph L0["資料載入與正規化"]
+            D1["【D1】五 JSON Loader<br/>▹ 前處理"]
+            D2["【D2】欄位映射 + 契約驗證<br/>Pascal→snake_case ▹ 前處理"]
+            D3["【D3】時間 +08:00 · Roaming÷100<br/>Growth 不轉換 ▹ 前處理"]
+            D4["【D4】事件注入處理<br/>▸ 模組2"]
+        end
+        subgraph L1["感知與 SOP 規則"]
+            P1["【P1】飽和度監測<br/>▸ 模組1"]
+            P2["【P2】人流成長率 SOP-3/4<br/>讀取 Growth_Rate ▸ 模組1"]
+            P3["【P3】漫遊比率 SOP-6<br/>≥0.30 ▸ 模組1·5"]
+            P4["【P4】SOP-1~7 規則引擎<br/>門檻→條款→動作 ▸ 模組1"]
+            P5["【P5】事件級別判定<br/>A級≥0.95 · B級0.85~0.95 ▸ 模組1"]
+        end
+        subgraph L3["路網推理 · SOP-2 · 60秒 SLA"]
+            R1["【R1】Graph Builder<br/>外部交會點僅 warning ▸ 模組2"]
+            R2["【R2】上下游判定<br/>▸ 模組2"]
+            R3["【R3】硬性排除<br/>封閉/容量&lt;1000/非直接相交<br/>僅下游/流向不符/飽和≥0.85<br/>▸ 模組2"]
+            R4["【R4】主/次路線選擇<br/>例外：飽和為唯一合格候選時保留<br/>saturated_but_retained+長綠燈 ▸ 模組2"]
+            R5["【R5】排除與降級理由<br/>▸ 模組2·4"]
+        end
+        A3["【A3】ETE 計算 SOP-7<br/>90 / 70 / 41 分鐘 ▸ 模組4"]
+        A4["【A4】決策軌跡記錄<br/>工具選擇+引用條款 ▸ 模組4"]
+        W2["【W2】對話狀態管理<br/>只存上下文·不做判定 ▸ 模組3"]
+    end
+
+    subgraph AG["🧠 A2 Agent Orchestrator · Strands + Bedrock"]
+        direction TB
+        A2["【A2】LLM 決定呼叫哪個工具<br/>不得產生事實 ▹ 核心編排"]
+        A1["【A1】事件分類器<br/>▸ 模組2"]
+    end
+
+    subgraph AI["🤖 Bedrock 生成與檢索"]
+        direction TB
+        K3["【K3】Knowledge Bases 檢索<br/>▸ 模組2·3"]
+        LLM["【LLM_A2】解釋敘述生成<br/>▸ 模組4"]
+        W1["【W1】What-if 參數解析與回答<br/>▸ 模組3"]
+        C1["【C1】交控建議書<br/>▸ 模組5·報告"]
+        C2["【C2】號誌配時建議<br/>▹ 報告"]
+        C3["【C3】跨系統聯動建議<br/>▹ 報告"]
+        C4["【C4】多語簡訊 中/英<br/>▸ 模組5"]
+    end
+
+    S3V[("S3 + Knowledge Base 索引<br/>由 SOP JSON 衍生 ▸ 模組2·3")]
+    LOG[("決策軌跡儲存<br/>記憶體/檔案·DynamoDB選配 ▸ 模組4")]
+
+    %% 載入
+    J1 & J2 & J3 & J4 & J5 --> D1 --> D2 --> D3
+    J5 -.->|離線建索引| S3V
+    S3V <--> K3
+
+    %% 感知：P1~P3 → P4 → P5
+    D3 --> P1 & P2 & P3
+    P1 & P2 & P3 --> P4 --> P5
+    P5 -->|預警觸發| API
+
+    %% 事件與編排
+    API --> D4 --> A1 --> A2
+    P5 --> A2
+    A2 -->|call 工具| R1 --> R2 --> R3 --> R4 --> R5
+    A2 -->|call 工具| A3
+    A2 -->|查 SOP 原文| K3
+    D3 -->|as-of 快照| R1
+    D3 -->|as-of 飽和度| A3
+    R5 --> A4
+    A3 --> A4
+    A4 --> LOG
+
+    %% 生成：C1~C4 一律由 A2 統一編排
+    A2 --> LLM
+    A2 --> C1 & C2 & C3
+    A2 -->|漫遊≥0.30 SOP-6| C4
+    LLM & C1 & C2 & C3 & C4 --> API
+
+    %% What-if：API → W2 → W1 → A2 重算 → W1 敘述
+    API --> W2 <--> W1
+    W1 -->|抽取覆寫參數| A2
+    A2 -->|重算結果| W1
+    W1 --> API
+
+    %% 回前端：REST 送出、WebSocket 推回
+    A4 --> API
+    F1 & F2 & F3 & F4 & F5 & F6 & F7 --- FWS
+    FWS -->|Fetch REST 送出請求| API
+    API -->|WebSocket 主動推播| FWS
+
+    classDef m1 fill:#E3F2FD,stroke:#1976D2,color:#0D47A1;
+    classDef m2 fill:#FFF3E0,stroke:#F57C00,color:#E65100;
+    classDef m3 fill:#F3E5F5,stroke:#8E24AA,color:#4A148C;
+    classDef m4 fill:#E8F5E9,stroke:#43A047,color:#1B5E20;
+    classDef m5 fill:#FCE4EC,stroke:#D81B60,color:#880E4F;
+    classDef shared fill:#ECEFF1,stroke:#607D8B,color:#263238;
+    classDef src fill:#FFF8E1,stroke:#FBC02D,color:#5D4037;
+
+    class F1,F2,P1,P2,P3,P4,P5 m1
+    class F3,F4,D4,R1,R2,R3,R4,R5,A1,K3,S3V m2
+    class F6,W1,W2 m3
+    class F7,A3,A4,LLM,LOG m4
+    class F5,C1,C4 m5
+    class API,D1,D2,D3,A2,FWS,C2,C3 shared
+    class J1,J2,J3,J4,J5 src

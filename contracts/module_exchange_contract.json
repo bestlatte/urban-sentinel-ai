@@ -1,0 +1,74 @@
+{
+  "$comment": "唯一定義處是 src/models.py（01-module-boundaries.md）。本檔案應由 Kiro 執行 `python -c \"import json; from src.models import *; ...\"` 呼叫 Pydantic 的 model_json_schema() 逐一產生 $defs，不要手動維護造成兩邊漂移。下面只先列出型別清單與列舉值當骨架，欄位細節以 src/models.py 為準。",
+  "schema_version": "1.0",
+  "$defs": {
+    "DataProvenance": { "enum": ["provided", "demo", "derived", "generated"] },
+    "ErrorCode": {
+      "enum": [
+        "VALIDATION_ERROR",
+        "DATA_NOT_FOUND",
+        "RULE_EVALUATION_FAILED",
+        "NO_FEASIBLE_ROUTE",
+        "KNOWLEDGE_RETRIEVAL_FAILED",
+        "MODEL_INVOCATION_FAILED",
+        "TIMEOUT",
+        "INTERNAL_ERROR"
+      ]
+    },
+    "ModuleName": {
+      "enum": [
+        "api_orchestrator",
+        "dashboard",
+        "data_ingestion",
+        "sensing_rules",
+        "incident_routing",
+        "bedrock_advisor",
+        "decision_reporting"
+      ]
+    },
+    "MessageType": {
+      "enum": [
+        "dashboard.updated.v1",
+        "decision.alert.v1",
+        "decision.cycle_start.v1",
+        "decision.task_update.v1",
+        "decision.completed.v1",
+        "rules.evaluated.v1",
+        "whatif.evaluated.v1",
+        "trace.answered.v1",
+        "chat.message.v1",
+        "chat.clear_session.v1",
+        "chat.loading_start.v1",
+        "chat.loading_step.v1",
+        "chat.response.v1",
+        "chat.input_lock.v1",
+        "chat.system_status.v1",
+        "chat.session_cleared.v1"
+      ]
+    },
+    "IncidentSeverity": { "enum": ["Critical", "High", "Medium", "Low"] },
+    "TrafficSample": { "$comment": "見 src/models.py TrafficSample" },
+    "CrowdSample": { "$comment": "見 src/models.py CrowdSample" },
+    "DisplayPoint": { "$comment": "見 src/models.py DisplayPoint" },
+    "RoadSegment": { "$comment": "見 src/models.py RoadSegment" },
+    "Incident": { "$comment": "見 src/models.py Incident" },
+    "SopClause": { "$comment": "見 src/models.py SopClause" },
+    "NormalizedDataBundle": { "$comment": "見 src/models.py NormalizedDataBundle" },
+    "EvidenceRef": { "$comment": "[INFERRED] 見 src/models.py EvidenceRef" },
+    "RuleHit": { "$comment": "見 src/models.py RuleHit" },
+    "SensingResult": { "$comment": "見 src/models.py SensingResult" },
+    "RouteRequest": { "$comment": "見 src/models.py RouteRequest" },
+    "RouteCandidate": { "$comment": "見 src/models.py RouteCandidate" },
+    "RoutePlan": { "$comment": "見 src/models.py RoutePlan" },
+    "EteEstimate": { "$comment": "見 src/models.py EteEstimate" },
+    "SopEvidence": { "$comment": "見 src/models.py SopEvidence" },
+    "BedrockAdvisory": { "$comment": "見 src/models.py BedrockAdvisory" },
+    "ScenarioOverrides": { "$comment": "見 src/models.py ScenarioOverrides" },
+    "WhatIfRequest": { "$comment": "見 src/models.py WhatIfRequest" },
+    "WhatIfResult": { "$comment": "見 src/models.py WhatIfResult" },
+    "TraceAnswer": { "$comment": "見 src/models.py TraceAnswer" },
+    "Notification": { "$comment": "見 src/models.py Notification" },
+    "DecisionResult": { "$comment": "見 src/models.py DecisionResult，最終版欄位見 .kiro/steering/04-system-architecture.md §6" },
+    "DashboardPayload": { "$comment": "見 src/models.py DashboardPayload" }
+  }
+}

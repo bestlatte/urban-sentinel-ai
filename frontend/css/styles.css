@@ -1,0 +1,4 @@
+/* Dashboard 主體樣式：深色指揮中心主題、CSS Grid 六分區版面。
+   參考 spec：m5-api-orchestrator-dashboard/design.md 第六節版面分區圖。
+   不用前端框架（00-tech-stack.md 禁用 React/Vue/Next.js/Svelte）。
+   TODO(Kiro): 依版面分區圖實作 Grid 版面、KPI卡片、深色主題配色。 */

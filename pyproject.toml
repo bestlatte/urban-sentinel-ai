@@ -1,0 +1,26 @@
+[project]
+name = "city-response-ai-agent"
+version = "0.1.0"
+description = "城市應變分析 AI Agent — 中華電信黑客松"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic>=2",
+    "networkx",
+    "pandas",
+    "boto3",
+    "strands-agents",
+]
+# 固定技術棧來源：.kiro/steering/00-tech-stack.md §1。
+# 明確禁止清單見同文件 §2——不得加入 React 建置工具鏈相關套件（不適用本專案，前端純原生JS）。
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "hypothesis",
+]
+# hypothesis 用於 m5-api-orchestrator-dashboard 的性質測試（design.md「Testing Strategy」節）。
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

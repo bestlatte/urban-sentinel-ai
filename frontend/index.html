@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<!--
+  版面骨架。參考 spec：m5-api-orchestrator-dashboard/design.md 第六節「前端檔案職責與版面分區」。
+  六分區 CSS Grid（單頁不換頁）+ F6 對話面板 + F2 異常自動彈窗容器。
+  不放商業邏輯——所有判定/計算都在後端，這裡只放 DOM 骨架。
+
+  [2026-07-28總架構師補充：業界通用版原型] F1-F5、F7 原本只有 M5 design.md 裡
+  一句話帶過，沒有像 F6 那樣的元件拆解——以下用「維運Dashboard的標準模式」補上
+  合理原型（KPI卡片列/時序圖/拓樸圖/表單面板/報告卡片/決策依據面板都是業界常見組件），
+  供團隊之後雕琢調整，不是最終定案。
+
+  「Agent活動面板」的歸屬決定：SPEC-O3 定義 decision.cycle_start.v1／
+  decision.task_update.v1 要推給「Agent活動面板」，但六分區版面圖原本沒有這個位置。
+  決定併入 F7（決策依據面板）當一個子分頁——理由：兩者都是「系統決策過程的即時
+  可解釋性」，同一個面板分「即時活動」與「決策依據」兩個分頁比另外擠出第七個
+  Grid區塊更符合現有六分區版面，也呼應SPEC-M4B「記錄與生成分離」的精神
+  （活動=記錄層即時視圖，決策依據=生成層事後解釋）。
+-->
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <title>城市應變分析 AI Agent · 智慧交通指揮中心</title>
+  <link rel="stylesheet" href="/frontend/css/chat-variables.css" />
+  <link rel="stylesheet" href="/frontend/css/styles.css" />
+  <link rel="stylesheet" href="/frontend/css/chat-panel.css" />
+  <link rel="stylesheet" href="/frontend/css/chat-messages.css" />
+  <link rel="stylesheet" href="/frontend/css/chat-cards.css" />
+  <link rel="stylesheet" href="/frontend/css/chat-input.css" />
+  <link rel="stylesheet" href="/frontend/css/chat-loading.css" />
+</head>
+<body>
+  <header id="header">
+    <!-- TODO(Kiro): 系統名稱、DashboardPayload.as_of、WS連線狀態燈（ws.js管理class）、
+         kpis.crowd_data_classification==="demo"時顯示「Demo Scenario」標籤 -->
+  </header>
+
+  <main class="dashboard-main">
+    <!-- F1：KPI卡片列（5張，見 src/models.py KpiSummary 五個欄位的業界通用版定義）
+         + 車流/人流時序圖（Chart.js，門檻線 0.85/0.95） -->
+    <section id="f1-kpi">
+      <div class="kpi-card" data-kpi="active_incident_count"></div>
+      <div class="kpi-card" data-kpi="current_level"></div>
+      <div class="kpi-card" data-kpi="average_saturation"></div>
+      <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
+      <div class="kpi-card" data-kpi="system_mode"></div>
+    </section>
+    <section id="f1-charts"><!-- Chart.js 車流／人流時序圖 --></section>
+
+    <!-- F4：SVG拓樸圖，依display_geometry.json定位，依DecisionResult.routes上色 -->
+    <section id="f4-map"></section>
+
+    <!-- F3：事件注入面板，列出 live_incidents.json 三筆 available_incidents -->
+    <section id="f3-inject">
+      <form id="incident-inject-form"><!-- 三筆事件的選擇 UI，送出呼叫 POST /api/incidents/evaluate --></form>
+    </section>
+
+    <!-- F7：決策依據面板，兩個分頁——即時活動（Agent活動面板併入於此）＋ 決策依據 -->
+    <section id="f7-decision-basis">
+      <nav class="f7-tabs">
+        <button data-tab="activity">即時活動</button>
+        <button data-tab="basis">決策依據</button>
+      </nav>
+      <div id="f7-activity-feed" data-tab-panel="activity">
+        <!-- 接收 decision.cycle_start.v1 / decision.task_update.v1，顯示週期進度時間軸 -->
+      </div>
+      <div id="f7-basis-detail" data-tab-panel="basis" hidden>
+        <!-- 顯示每筆 RuleHit 的 clause_id + 條款內容、routes.candidates 的排除/保留理由，
+             以及「查看推理過程」按鈕（呼叫 generate_report_explanation，見F6 Explain按鈕的姊妹功能） -->
+      </div>
+    </section>
+
+    <!-- F5：建議書／簡訊卡片，顯示 control_center_report 全文與 notifications -->
+    <section id="f5-report"></section>
+  </main>
+
+  <!-- F2 異常自動彈窗：收到 decision.alert.v1 時覆蓋顯示 -->
+  <div id="f2-alert-modal" hidden></div>
+
+  <!-- F6 What-if 對話框，見 m3-bedrock-advisor/F6-chat-ui/design.md -->
+  <button id="chat-toggle-btn" class="chat-fab">💬</button>
+  <div id="chat-panel" class="chat-panel collapsed">
+    <div class="chat-resize-handle"></div>
+    <div class="chat-header" id="chat-header"></div>
+    <div class="chat-status-banner" id="status-banner"></div>
+    <div class="chat-messages" id="chat-messages"></div>
+    <div class="chat-quick-questions" id="chat-quick-questions"></div>
+    <div class="chat-input-area" id="chat-input-area"></div>
+  </div>
+
+  <script src="/frontend/js/chat-utils.js"></script>
+  <script src="/frontend/js/chat-state.js"></script>
+  <script src="/frontend/js/chat-render.js"></script>
+  <script src="/frontend/js/api.js"></script>
+  <script src="/frontend/js/ws.js"></script>
+  <script src="/frontend/js/charts.js"></script>
+  <script src="/frontend/js/map.js"></script>
+  <script src="/frontend/js/chat-app.js"></script>
+  <script src="/frontend/js/app.js"></script>
+  <script src="/frontend/vendor/chart.umd.js"></script>
+</body>
+</html>

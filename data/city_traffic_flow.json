@@ -1,0 +1,1010 @@
+[
+  {
+    "Timestamp": "2026-05-20 17:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 42,
+    "Vehicle_Count": 1250,
+    "Saturation_Score": 0.58,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 17:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 820,
+    "Saturation_Score": 0.62,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 17:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 1550,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 17:00",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 45,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.55,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 17:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 40,
+    "Vehicle_Count": 1100,
+    "Saturation_Score": 0.5,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 18:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 1600,
+    "Saturation_Score": 0.8,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 18:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.88,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 18:00",
+    "Segment_ID": "RD_TPE_009",
+    "Road_Name": "基隆路地下道",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 1400,
+    "Saturation_Score": 0.82,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 35,
+    "Vehicle_Count": 1400,
+    "Saturation_Score": 0.7,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 1200,
+    "Saturation_Score": 0.55,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 42,
+    "Vehicle_Count": 700,
+    "Saturation_Score": 0.42,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 1600,
+    "Saturation_Score": 0.75,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 44,
+    "Vehicle_Count": 1700,
+    "Saturation_Score": 0.56,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 19:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 1150,
+    "Saturation_Score": 0.55,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 40,
+    "Vehicle_Count": 750,
+    "Saturation_Score": 0.4,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 40,
+    "Vehicle_Count": 1300,
+    "Saturation_Score": 0.6,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 33,
+    "Vehicle_Count": 1500,
+    "Saturation_Score": 0.74,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 44,
+    "Vehicle_Count": 1750,
+    "Saturation_Score": 0.56,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 40,
+    "Vehicle_Count": 1100,
+    "Saturation_Score": 0.52,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 20:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 39,
+    "Vehicle_Count": 1150,
+    "Saturation_Score": 0.54,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 2100,
+    "Saturation_Score": 0.9,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 1050,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 26,
+    "Vehicle_Count": 1850,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 42,
+    "Vehicle_Count": 1900,
+    "Saturation_Score": 0.62,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 1300,
+    "Saturation_Score": 0.58,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 36,
+    "Vehicle_Count": 1300,
+    "Saturation_Score": 0.62,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 2100,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_007",
+    "Road_Name": "松高路",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 600,
+    "Saturation_Score": 0.55,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 2300,
+    "Saturation_Score": 0.93,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 1150,
+    "Saturation_Score": 0.9,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 40,
+    "Vehicle_Count": 2000,
+    "Saturation_Score": 0.66,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 1350,
+    "Saturation_Score": 0.58,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:15",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 34,
+    "Vehicle_Count": 1400,
+    "Saturation_Score": 0.66,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 10,
+    "Vehicle_Count": 2600,
+    "Saturation_Score": 0.99,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 12,
+    "Vehicle_Count": 1250,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 35,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.8,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_010",
+    "Road_Name": "市府路",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 950,
+    "Saturation_Score": 0.6,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 16,
+    "Vehicle_Count": 2200,
+    "Saturation_Score": 0.93,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 36,
+    "Vehicle_Count": 1450,
+    "Saturation_Score": 0.62,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:30",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 1550,
+    "Saturation_Score": 0.7,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 7,
+    "Vehicle_Count": 2750,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 8,
+    "Vehicle_Count": 1350,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_008",
+    "Road_Name": "延吉街",
+    "Avg_Speed": 20,
+    "Vehicle_Count": 550,
+    "Saturation_Score": 0.88,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 12,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.95,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 38,
+    "Vehicle_Count": 2300,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 34,
+    "Vehicle_Count": 1600,
+    "Saturation_Score": 0.68,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 21:45",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 1700,
+    "Saturation_Score": 0.76,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 5,
+    "Vehicle_Count": 2900,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 5,
+    "Vehicle_Count": 1450,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 10,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.95,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 2300,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 1500,
+    "Saturation_Score": 0.65,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_007",
+    "Road_Name": "松高路",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 700,
+    "Saturation_Score": 0.62,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_008",
+    "Road_Name": "延吉街",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 450,
+    "Saturation_Score": 0.8,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_009",
+    "Road_Name": "基隆路地下道",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 1600,
+    "Saturation_Score": 0.75,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_010",
+    "Road_Name": "市府路",
+    "Avg_Speed": 30,
+    "Vehicle_Count": 900,
+    "Saturation_Score": 0.55,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_011",
+    "Road_Name": "松壽路",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 850,
+    "Saturation_Score": 0.7,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_012",
+    "Road_Name": "敦化南路二段",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 2000,
+    "Saturation_Score": 0.68,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_013",
+    "Road_Name": "信義路五段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 2000,
+    "Saturation_Score": 0.68,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_014",
+    "Road_Name": "松智路",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 650,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:00",
+    "Segment_ID": "RD_TPE_015",
+    "Road_Name": "復興南路一段",
+    "Avg_Speed": 32,
+    "Vehicle_Count": 1900,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:10",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 2,
+    "Vehicle_Count": 1600,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Accident_Impact"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 4,
+    "Vehicle_Count": 2950,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 0,
+    "Vehicle_Count": 1700,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Blocked"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 8,
+    "Vehicle_Count": 2600,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 2500,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 1700,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 2000,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_007",
+    "Road_Name": "松高路",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 800,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_008",
+    "Road_Name": "延吉街",
+    "Avg_Speed": 5,
+    "Vehicle_Count": 650,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Gridlock"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_009",
+    "Road_Name": "基隆路地下道",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_010",
+    "Road_Name": "市府路",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 1000,
+    "Saturation_Score": 0.65,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_011",
+    "Road_Name": "松壽路",
+    "Avg_Speed": 23,
+    "Vehicle_Count": 950,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_012",
+    "Road_Name": "敦化南路二段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 2200,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_013",
+    "Road_Name": "信義路五段",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 2200,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_014",
+    "Road_Name": "松智路",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 750,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:15",
+    "Segment_ID": "RD_TPE_015",
+    "Road_Name": "復興南路一段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 2100,
+    "Saturation_Score": 0.78,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 3,
+    "Vehicle_Count": 3100,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Gridlock"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 0,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Blocked"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 5,
+    "Vehicle_Count": 2800,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 12,
+    "Vehicle_Count": 2800,
+    "Saturation_Score": 0.95,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 12,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_007",
+    "Road_Name": "松高路",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 1000,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_008",
+    "Road_Name": "延吉街",
+    "Avg_Speed": 0,
+    "Vehicle_Count": 700,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Gridlock"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_009",
+    "Road_Name": "基隆路地下道",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 2200,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_010",
+    "Road_Name": "市府路",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 1200,
+    "Saturation_Score": 0.72,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_011",
+    "Road_Name": "松壽路",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 1050,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_012",
+    "Road_Name": "敦化南路二段",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 2500,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_013",
+    "Road_Name": "信義路五段",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_014",
+    "Road_Name": "松智路",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 850,
+    "Saturation_Score": 0.82,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:30",
+    "Segment_ID": "RD_TPE_015",
+    "Road_Name": "復興南路一段",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 1400,
+    "Saturation_Score": 0.75,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 4,
+    "Vehicle_Count": 2800,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Gridlock"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 0,
+    "Vehicle_Count": 1850,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Blocked"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 8,
+    "Vehicle_Count": 2700,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_004",
+    "Road_Name": "市民大道四段",
+    "Avg_Speed": 8,
+    "Vehicle_Count": 2900,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_005",
+    "Road_Name": "仁愛路四段",
+    "Avg_Speed": 15,
+    "Vehicle_Count": 1900,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 10,
+    "Vehicle_Count": 2500,
+    "Saturation_Score": 0.99,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_007",
+    "Road_Name": "松高路",
+    "Avg_Speed": 15,
+    "Vehicle_Count": 1100,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_008",
+    "Road_Name": "延吉街",
+    "Avg_Speed": 0,
+    "Vehicle_Count": 750,
+    "Saturation_Score": 1.0,
+    "Lane_Status": "Gridlock"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_009",
+    "Road_Name": "基隆路地下道",
+    "Avg_Speed": 10,
+    "Vehicle_Count": 2400,
+    "Saturation_Score": 0.98,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_010",
+    "Road_Name": "市府路",
+    "Avg_Speed": 22,
+    "Vehicle_Count": 1400,
+    "Saturation_Score": 0.82,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_011",
+    "Road_Name": "松壽路",
+    "Avg_Speed": 18,
+    "Vehicle_Count": 1100,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_012",
+    "Road_Name": "敦化南路二段",
+    "Avg_Speed": 20,
+    "Vehicle_Count": 2700,
+    "Saturation_Score": 0.92,
+    "Lane_Status": "Critical"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_013",
+    "Road_Name": "信義路五段",
+    "Avg_Speed": 25,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.65,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_014",
+    "Road_Name": "松智路",
+    "Avg_Speed": 20,
+    "Vehicle_Count": 900,
+    "Saturation_Score": 0.88,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 22:45",
+    "Segment_ID": "RD_TPE_015",
+    "Road_Name": "復興南路一段",
+    "Avg_Speed": 20,
+    "Vehicle_Count": 1500,
+    "Saturation_Score": 0.82,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 23:00",
+    "Segment_ID": "RD_TPE_001",
+    "Road_Name": "忠孝東路四段",
+    "Avg_Speed": 15,
+    "Vehicle_Count": 1800,
+    "Saturation_Score": 0.85,
+    "Lane_Status": "Congested"
+  },
+  {
+    "Timestamp": "2026-05-20 23:00",
+    "Segment_ID": "RD_TPE_002",
+    "Road_Name": "光復南路",
+    "Avg_Speed": 10,
+    "Vehicle_Count": 1200,
+    "Saturation_Score": 0.9,
+    "Lane_Status": "Partial_Open"
+  },
+  {
+    "Timestamp": "2026-05-20 23:00",
+    "Segment_ID": "RD_TPE_006",
+    "Road_Name": "敦化南路一段",
+    "Avg_Speed": 28,
+    "Vehicle_Count": 1200,
+    "Saturation_Score": 0.6,
+    "Lane_Status": "Normal"
+  },
+  {
+    "Timestamp": "2026-05-20 23:15",
+    "Segment_ID": "RD_TPE_003",
+    "Road_Name": "基隆路一段",
+    "Avg_Speed": 35,
+    "Vehicle_Count": 1200,
+    "Saturation_Score": 0.6,
+    "Lane_Status": "Normal"
+  }
+]

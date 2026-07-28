@@ -1,0 +1,3 @@
+/* F6 面板容器、收合/展開、拖拉。參考 spec：F6-chat-ui/design.md 第四節(4.1/4.8/4.9)。
+   TODO(Kiro): .chat-panel 固定右側、.collapsed 隱藏、.chat-fab 浮動按鈕、
+   拖拉條 .chat-resize-handle（最小350px、最大550px）。 */
