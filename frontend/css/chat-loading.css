@@ -1,2 +1,63 @@
-/* Loading 動畫、步驟進度。參考 spec：F6-chat-ui/design.md 第四節(4.6)。
-   TODO(Kiro): .loading-dots 跳動動畫、.loading-steps 步驟狀態(done/active/待處理)。 */
+/* Loading 動畫、步驟進度。 */
+
+.loading-container {
+  padding: 12px 16px;
+}
+
+.loading-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.loading-dots span {
+  width: 6px;
+  height: 6px;
+  background: var(--chat-primary);
+  border-radius: 50%;
+  animation: dot-bounce 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) { animation-delay: -0.32s; }
+.loading-dots span:nth-child(2) { animation-delay: -0.16s; }
+.loading-dots span:nth-child(3) { animation-delay: 0; }
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0); }
+  40% { transform: scale(1); }
+}
+
+.loading-steps {
+  margin-top: 8px;
+  font-size: 0.75rem;
+}
+
+.loading-step {
+  padding: 4px 0;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.loading-step.done {
+  color: var(--chat-success);
+}
+
+.loading-step.active {
+  color: var(--chat-primary);
+  font-weight: 500;
+}
+
+.loading-step::before {
+  content: "○";
+  font-size: 0.625rem;
+}
+
+.loading-step.done::before {
+  content: "●";
+}
+
+.loading-step.active::before {
+  content: "◉";
+}

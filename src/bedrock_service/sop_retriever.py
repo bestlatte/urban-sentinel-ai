@@ -6,12 +6,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 
 from src.bedrock_service.bedrock_kb import query_bedrock_kb
 from src.bedrock_service.local_fallback import query_local
 from src.bedrock_service.sop_data import SopMatch
+
+logger = logging.getLogger(__name__)
 
 USE_BEDROCK = os.getenv("USE_BEDROCK", "true").lower() == "true"
 
@@ -28,8 +31,23 @@ class SopQueryResult:
 def query_sop(question: str) -> SopQueryResult:
     """對外唯一入口，內部依 USE_BEDROCK 與呼叫成功與否切換雲端/本機模式。
 
-    TODO(Kiro): 依 design.md 第五節實作，Bedrock 呼叫失敗時
-    (except Exception) 要真的 fallback 到 query_local()，
+    Bedrock 呼叫失敗時 (except Exception) 真的 fallback 到 query_local()，
     retrieval_source 設為 "local_fallback"，不是讓例外往上拋。
     """
-    raise NotImplementedError("見 K3-sop-rag/design.md 第五節")
+    if USE_BEDROCK:
+        try:
+            sections = query_bedrock_kb(question)
+            retrieval_source = "bedrock"
+        except Exception:
+            logger.exception("Bedrock KB 呼叫失敗，退化為本機關鍵字比對")
+            sections = query_local(question)
+            retrieval_source = "local_fallback"
+    else:
+        sections = query_local(question)
+        retrieval_source = "local"
+
+    return SopQueryResult(
+        sections=sections,
+        query=question,
+        retrieval_source=retrieval_source,
+    )

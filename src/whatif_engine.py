@@ -29,15 +29,82 @@ def apply_scenario_overrides(
 ) -> NormalizedDataBundle:
     """深拷貝 bundle，依 overrides（key格式 "{entity}.{field}"）覆寫對應欄位。
 
-    entity 可能是 BS_* 站點（覆寫 CrowdSample）或 RD_* 路段（覆寫 TrafficSample/
-    RoadSegment 狀態）；field 是要覆寫的屬性名（如 User_Count/Growth_Rate/status）。
+    entity 前綴 BS_ → 覆寫 CrowdSample（找 station_id 匹配的全部紀錄）
+    entity 前綴 RD_ → 覆寫 TrafficSample（找 segment_id 匹配的全部紀錄）
+                      或 RoadSegment（如果欄位屬於 RoadSegment）
 
-    TODO(Kiro): 依 entity 前綴（BS_/RD_）決定要改 bundle.crowd 還是
-    bundle.traffic/road_network 裡對應 id 的紀錄；找不到對應 entity 時應拋
-    ValueError（覆寫一個不存在的東西是使用者輸入錯誤，不是靜默忽略）。
+    找不到對應 entity 時拋 ValueError。
     """
     new_bundle = copy.deepcopy(bundle)
-    raise NotImplementedError("見本函式 docstring；欄位對照表見 02-data-contract.md §2/3")
+
+    # 欄位名映射（原始名→正規化名）
+    _CROWD_FIELD_MAP = {
+        "User_Count": "user_count",
+        "user_count": "user_count",
+        "Growth_Rate": "growth_rate",
+        "growth_rate": "growth_rate",
+        "Roaming_User_Pct": "roaming_user_pct",
+        "roaming_user_pct": "roaming_user_pct",
+        "Stay_Time_Avg": "stay_time_avg",
+        "stay_time_avg": "stay_time_avg",
+    }
+    _TRAFFIC_FIELD_MAP = {
+        "Saturation_Score": "saturation_score",
+        "saturation_score": "saturation_score",
+        "Avg_Speed": "avg_speed",
+        "avg_speed": "avg_speed",
+        "Vehicle_Count": "vehicle_count",
+        "vehicle_count": "vehicle_count",
+        "Lane_Status": "lane_status",
+        "lane_status": "lane_status",
+        "status": "lane_status",  # "status" 映射到 lane_status（最接近的語意）
+    }
+    _ROAD_FIELD_MAP = {
+        "capacity_vph": "capacity_vph",
+        "flow_direction": "flow_direction",
+    }
+
+    for key, value in overrides.items():
+        parts = key.split(".", 1)
+        if len(parts) != 2:
+            raise ValueError(f"override key 格式不合法（需 entity.field）: {key}")
+        entity, field = parts
+
+        if entity.startswith("BS_"):
+            # 覆寫 CrowdSample
+            normalized_field = _CROWD_FIELD_MAP.get(field)
+            if normalized_field is None:
+                raise ValueError(f"CrowdSample 不支援的欄位: {field}")
+            matched = [c for c in new_bundle.crowd if c.station_id == entity]
+            if not matched:
+                raise ValueError(f"找不到 station_id={entity} 的 CrowdSample")
+            for sample in matched:
+                setattr(sample, normalized_field, value)
+
+        elif entity.startswith("RD_"):
+            # 先嘗試 TrafficSample
+            normalized_field = _TRAFFIC_FIELD_MAP.get(field)
+            if normalized_field is not None:
+                matched = [t for t in new_bundle.traffic if t.segment_id == entity]
+                if not matched:
+                    raise ValueError(f"找不到 segment_id={entity} 的 TrafficSample")
+                for sample in matched:
+                    setattr(sample, normalized_field, value)
+            else:
+                # 嘗試 RoadSegment
+                normalized_field = _ROAD_FIELD_MAP.get(field)
+                if normalized_field is not None:
+                    matched = [s for s in new_bundle.road_network if s.segment_id == entity]
+                    if not matched:
+                        raise ValueError(f"找不到 segment_id={entity} 的 RoadSegment")
+                    for seg in matched:
+                        setattr(seg, normalized_field, value)
+                else:
+                    raise ValueError(f"RD_ entity 不支援的欄位: {field}")
+        else:
+            raise ValueError(f"不支援的 entity 前綴（需 BS_ 或 RD_）: {entity}")
+
+    return new_bundle
 
 
 def run_scenario(
@@ -83,22 +150,95 @@ def run_scenario(
     }
 
 
-def diff_from_base(base: dict, scenario: dict) -> list[dict]:
-    """[2026-07-28總架構師補充：回應Kiro審查，定案 WhatIfResult.differences_from_base
-    的計算方式] `base` 與 `scenario` 都是 `run_scenario()` 的回傳格式（或等價的
-    DecisionResult 摘要）。比較粒度固定為以下四項，不逐欄位全比對（太細會讓
-    differences 充滿雜訊，例如 duration_ms 一定不同但沒有展示價值）：
+def diff_from_base(base: dict | None, scenario: dict) -> list[dict]:
+    """比較 base 與 scenario 的差異，固定四項比對：
 
-        1. traffic_level（"A"/"B"/"normal"，從 rule_hits 或另外傳入）
-        2. ete.minutes
-        3. route_plan.primary.segment_id / route_plan.secondary.segment_id
-        4. 觸發的 SOP clause_id 集合（{h.clause_id for h in rule_hits} 的差集）
+    1. traffic_level（從 rule_hits 中取 SOP-1 最高級別）
+    2. ete.minutes
+    3. route_plan.primary.segment_id / route_plan.secondary.segment_id
+    4. 觸發的 SOP clause_id 集合的差集
 
-    只有值真的不同才放進回傳的 list，每項格式 {"field": str, "base_value": Any,
-    "new_value": Any}。base 若為 None（`base_decision_id` 未提供、且找不到
-    `base_as_of` 現況可比較），回傳空 list，不是報錯——沒有基準可比時，
-    "沒有差異" 是合理預設值，不是錯誤狀態。
-
-    TODO(Kiro): 依上述四項實作比對邏輯。
+    base 為 None 時回傳空 list（沒有基準可比）。
     """
-    raise NotImplementedError("見本函式 docstring")
+    if base is None:
+        return []
+
+    diffs: list[dict] = []
+
+    # 輔助：從 rule_hits 提取 traffic_level
+    def _extract_level(data: dict) -> str:
+        hits = data.get("rule_hits", [])
+        max_level = "normal"
+        for h in hits:
+            clause = h.clause_id if hasattr(h, "clause_id") else h.get("clause_id", "")
+            if clause == "SOP-1":
+                evidence = h.evidence if hasattr(h, "evidence") else h.get("evidence", {})
+                val = evidence.value if hasattr(evidence, "value") else evidence.get("value", 0)
+                if isinstance(val, (int, float)):
+                    if val >= 0.95:
+                        max_level = "A"
+                    elif val >= 0.85 and max_level != "A":
+                        max_level = "B"
+        return max_level
+
+    # 1. traffic_level
+    base_level = _extract_level(base)
+    scenario_level = _extract_level(scenario)
+    if base_level != scenario_level:
+        diffs.append({"field": "traffic_level", "base_value": base_level, "new_value": scenario_level})
+
+    # 2. ete.minutes
+    base_ete = base.get("ete")
+    scenario_ete = scenario.get("ete")
+    base_minutes = (base_ete.minutes if hasattr(base_ete, "minutes") else base_ete.get("minutes") if isinstance(base_ete, dict) else None) if base_ete else None
+    scenario_minutes = (scenario_ete.minutes if hasattr(scenario_ete, "minutes") else scenario_ete.get("minutes") if isinstance(scenario_ete, dict) else None) if scenario_ete else None
+    if base_minutes != scenario_minutes:
+        diffs.append({"field": "ete.minutes", "base_value": base_minutes, "new_value": scenario_minutes})
+
+    # 3. 主次路線 segment_id
+    def _extract_route_ids(data: dict) -> tuple[str | None, str | None]:
+        rp = data.get("route_plan")
+        if rp is None:
+            return None, None
+        if hasattr(rp, "primary"):
+            primary_id = rp.primary.segment_id if rp.primary else None
+            secondary_id = rp.secondary.segment_id if rp.secondary else None
+        elif isinstance(rp, dict):
+            p = rp.get("primary")
+            s = rp.get("secondary")
+            primary_id = (p.get("segment_id") if isinstance(p, dict) else (p.segment_id if p else None)) if p else None
+            secondary_id = (s.get("segment_id") if isinstance(s, dict) else (s.segment_id if s else None)) if s else None
+        else:
+            primary_id = None
+            secondary_id = None
+        return primary_id, secondary_id
+
+    base_primary, base_secondary = _extract_route_ids(base)
+    scen_primary, scen_secondary = _extract_route_ids(scenario)
+    if base_primary != scen_primary or base_secondary != scen_secondary:
+        diffs.append({
+            "field": "routes",
+            "base_value": {"primary": base_primary, "secondary": base_secondary},
+            "new_value": {"primary": scen_primary, "secondary": scen_secondary},
+        })
+
+    # 4. 觸發的 SOP clause_id 集合
+    def _extract_clause_ids(data: dict) -> set[str]:
+        hits = data.get("rule_hits", [])
+        result = set()
+        for h in hits:
+            cid = h.clause_id if hasattr(h, "clause_id") else h.get("clause_id", "")
+            if cid:
+                result.add(cid)
+        return result
+
+    base_clauses = _extract_clause_ids(base)
+    scenario_clauses = _extract_clause_ids(scenario)
+    if base_clauses != scenario_clauses:
+        diffs.append({
+            "field": "triggered_sop_clauses",
+            "base_value": sorted(base_clauses),
+            "new_value": sorted(scenario_clauses),
+        })
+
+    return diffs

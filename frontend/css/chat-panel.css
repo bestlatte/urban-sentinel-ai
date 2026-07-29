@@ -1,3 +1,80 @@
-/* F6 面板容器、收合/展開、拖拉。參考 spec：F6-chat-ui/design.md 第四節(4.1/4.8/4.9)。
-   TODO(Kiro): .chat-panel 固定右側、.collapsed 隱藏、.chat-fab 浮動按鈕、
-   拖拉條 .chat-resize-handle（最小350px、最大550px）。 */
+/* F6 面板容器、收合/展開、拖拉。 */
+
+.chat-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--chat-primary);
+  color: #fff;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  box-shadow: var(--chat-shadow);
+  z-index: 900;
+}
+
+.chat-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: var(--chat-panel-width);
+  height: 100vh;
+  background: #ffffff;
+  color: #1e293b;
+  display: flex;
+  flex-direction: column;
+  z-index: 950;
+  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
+  transition: transform 0.3s ease;
+}
+
+.chat-panel.collapsed {
+  transform: translateX(100%);
+}
+
+.chat-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.chat-resize-handle:hover {
+  background: var(--chat-primary);
+}
+
+.chat-header {
+  padding: 12px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+}
+
+.chat-status-banner {
+  padding: 8px 16px;
+  font-size: 0.75rem;
+  display: none;
+}
+
+.chat-status-banner.visible {
+  display: block;
+}
+
+.chat-status-banner.level-a {
+  background: var(--level-a);
+  color: #fff;
+}
+
+.chat-status-banner.level-b {
+  background: var(--level-b);
+  color: #fff;
+}

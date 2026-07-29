@@ -1,2 +1,73 @@
-/* Decision Card、SOP Badge、ETE Badge、Route Tag。參考 spec：F6-chat-ui/design.md 第四節(4.4)。
-   TODO(Kiro): .decision-card 白底陰影、.sop-badge 多色版本、.route-tag（blocked/primary）。 */
+/* Decision Card、SOP Badge、ETE Badge、Route Tag。 */
+
+.decision-card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.decision-card .card-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 8px;
+  color: #1e293b;
+}
+
+.sop-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.sop-badge.sop-1 { background: #fef3c7; color: #92400e; }
+.sop-badge.sop-2 { background: #fee2e2; color: #991b1b; }
+.sop-badge.sop-3 { background: #dbeafe; color: #1e40af; }
+.sop-badge.sop-4 { background: #e0e7ff; color: #3730a3; }
+.sop-badge.sop-5 { background: #fce7f3; color: #9d174d; }
+.sop-badge.sop-6 { background: #d1fae5; color: #065f46; }
+.sop-badge.sop-7 { background: #f3e8ff; color: #6b21a8; }
+
+.ete-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: #fef9c3;
+  color: #854d0e;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.route-tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-right: 4px;
+}
+
+.route-tag.primary {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid var(--route-primary);
+}
+
+.route-tag.secondary {
+  background: #fefce8;
+  color: #713f12;
+  border: 1px solid var(--route-secondary);
+}
+
+.route-tag.blocked {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid var(--route-closed);
+}

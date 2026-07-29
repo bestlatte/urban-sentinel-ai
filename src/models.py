@@ -234,6 +234,16 @@ class RuleHit(BaseModel):
     evidence: EvidenceRef
     is_primary: bool = False
     """True 表示這是事件的主因 SOP，其餘為並行命中（不得被改寫）。"""
+    city_response: bool = False
+    """[2026-07-28總架構師補充：回應Kiro Phase 1.2審查] 只在 clause_id="SOP-1" 且
+    segment_id 屬於城市應變觸發限定路段（RD_TPE_001/002，SOP原文）時為 True。
+
+    由 `rules.py` 算一次寫進這裡，下游（`reporting.py` 的 C2 號誌建議、
+    `orchestrator.py` 的 SPEC-O2 §1-A 靜態分派「同步觸發替代路徑引導」判斷）
+    直接讀這個欄位，不得各自重新定義一份城市應變路段清單——重複定義同一個規則
+    在不同檔案裡，正是這次整個審查過程反覆抓到的同一種 bug（`ReasonCode` 曾經
+    三處定義互相對不上），這裡刻意用欄位而不是常數重複，杜絕同樣的問題再發生。
+    """
 
 
 class SensingResult(BaseModel):

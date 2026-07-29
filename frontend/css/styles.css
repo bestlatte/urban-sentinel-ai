@@ -1,4 +1,157 @@
-/* Dashboard 主體樣式：深色指揮中心主題、CSS Grid 六分區版面。
-   參考 spec：m5-api-orchestrator-dashboard/design.md 第六節版面分區圖。
-   不用前端框架（00-tech-stack.md 禁用 React/Vue/Next.js/Svelte）。
-   TODO(Kiro): 依版面分區圖實作 Grid 版面、KPI卡片、深色主題配色。 */
+/* Dashboard 主體：深色指揮中心主題、CSS Grid 六分區版面。 */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#header {
+  background: #1e293b;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #334155;
+}
+
+.dashboard-main {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto 1fr auto;
+  gap: 16px;
+  padding: 16px;
+  height: calc(100vh - 56px);
+}
+
+#f1-kpi {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 12px;
+}
+
+.kpi-card {
+  flex: 1;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+  text-align: center;
+}
+
+.kpi-card .kpi-value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.kpi-card .kpi-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+#f1-charts {
+  grid-column: 1 / -1;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+  min-height: 200px;
+}
+
+#f4-map {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+  min-height: 300px;
+}
+
+#f3-inject {
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+}
+
+#f3-inject button {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 10px;
+  background: #334155;
+  color: #e2e8f0;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+#f3-inject button:hover {
+  background: #475569;
+}
+
+#f7-decision-basis {
+  grid-column: 1 / -1;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+}
+
+.f7-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.f7-tabs button {
+  padding: 6px 16px;
+  background: #334155;
+  color: #94a3b8;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.f7-tabs button.active {
+  background: var(--chat-primary);
+  color: #fff;
+}
+
+#f5-report {
+  grid-column: 1 / -1;
+  background: #1e293b;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #334155;
+  white-space: pre-wrap;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+#f2-alert-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+#f2-alert-modal[hidden] { display: none; }
+
+#f2-alert-modal .alert-content {
+  background: #1e293b;
+  border: 2px solid var(--level-a);
+  border-radius: 12px;
+  padding: 32px;
+  max-width: 500px;
+  text-align: center;
+}

@@ -1,9 +1,37 @@
 /**
- * Fetch 四個 REST 端點、Envelope 拆封、錯誤碼轉可讀訊息。不解讀業務欄位。
- * 參考 spec：m5-api-orchestrator-dashboard/design.md 第六節。
+ * Fetch API 封裝：四個 REST 端點。
+ * 不用 axios（00-tech-stack.md 禁用），用原生 Fetch。
  */
 
-// TODO(Kiro): fetchDashboard(), evaluateIncident(eventId), postWhatIf(body) —
-// postWhatIf 的回應可能是 whatif.evaluated.v1/WhatIfResult 或
-// trace.answered.v1/TraceAnswer，依 message_type 分派（見
-// .kiro/steering/04-system-architecture.md §5）。
+async function fetchDashboard() {
+  const resp = await fetch("/api/dashboard");
+  return resp.json();
+}
+
+async function fetchEvaluateIncident(eventId) {
+  const resp = await fetch("/api/incidents/evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event_id: eventId }),
+  });
+  return resp.json();
+}
+
+async function fetchWhatIf(content, sessionId, correlationId, currentTraceId) {
+  const resp = await fetch("/api/what-if", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: sessionId || ChatState.sessionId,
+      content: content,
+      correlation_id: correlationId || generateId(),
+      current_trace_id: currentTraceId || null,
+    }),
+  });
+  return resp.json();
+}
+
+async function fetchHealth() {
+  const resp = await fetch("/api/health");
+  return resp.json();
+}

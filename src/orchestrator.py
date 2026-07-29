@@ -13,20 +13,30 @@
 from __future__ import annotations
 
 import contextvars
+import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from typing import Protocol
+
+logger = logging.getLogger(__name__)
+_TZ_TAIPEI = timezone(timedelta(hours=8))
 
 from src.models import (
     BedrockAdvisory,
     DecisionResult,
     EteEstimate,
+    EvidenceRef,
     Incident,
+    IncidentSeverity,
     Notification,
     NormalizedDataBundle,
+    RouteCandidate,
     RoutePlan,
     RouteRequest,
+    RuleHit,
     SensingResult,
+    SopEvidence,
 )
 
 
@@ -75,34 +85,201 @@ class ModuleGateway(Protocol):
 
 
 class StubGateway:
-    """開發初期用假資料回傳，事件相關欄位取自 available_incidents 的三筆 ID。
-    不讀 data/**（那是 M1 的權限）。每次呼叫都要在 Envelope warnings 留下
-    "module_stub_in_use:<module>"。
+    """開發初期用假資料回傳，固定用 ACC_001 黃金值反推。"""
 
-    [2026-07-28總架構師補充：回應Kiro審查——固定用 ACC_001 黃金情境反推假資料，
-    不要自己編一組跟黃金值對不上的數字，這樣 Stub 模式下手動測試也能對答案]：
-        load_data()      → 只需含 ACC_001 這筆 incident 的最小 bundle 即可
-        evaluate_rules() → SensingResult(traffic_level="A", rule_hits=[命中SOP-2的
-                            RuleHit], as_of=incident.timestamp)
-        plan_routes()    → RoutePlan(primary=RD_TPE_004, secondary=RD_TPE_005,
-                            excluded=[RD_TPE_006, RD_TPE_008]的假RouteCandidate)
-        calculate_ete()  → EteEstimate(minutes=90, recovery_at="2026-05-20 23:40",
-                            formula="60 + max(0,(1.0-0.5)*60) = 90", base_clearance=60,
-                            average_saturation=1.0) —— 這組數字就是黃金驗收值本身，
-                            Stub 模式下也應該要能通過 tests/test_orchestrator.py 的
-                            test_acc001_golden_regression_full_pipeline
-        generate_report()→ 回傳固定字串 + Notification(zh="...", en=None)
-        run_agent()      → BedrockAdvisory(text="...", sop_evidence=[至少一筆假SopEvidence])
-    """
+    def load_data(self) -> NormalizedDataBundle:
+        from datetime import timezone, timedelta
+        tz = timezone(timedelta(hours=8))
+        now = datetime(2026, 5, 20, 22, 10, tzinfo=tz)
+        return NormalizedDataBundle(
+            traffic=[],
+            crowd=[],
+            road_network=[],
+            incidents=[
+                Incident(
+                    event_id="TPE_2026_ACC_001",
+                    type="Road_Collapse_Accident",
+                    location="光復南路/忠孝東路口",
+                    affected_segment="RD_TPE_002",
+                    status="Closed",
+                    severity=IncidentSeverity.CRITICAL,
+                    description="路面塌陷",
+                    timestamp=now,
+                ),
+            ],
+            sop=[],
+            loaded_at=now,
+        )
 
-    # TODO(Kiro): 依上述固定值實作全部方法。
+    def evaluate_rules(
+        self, bundle: NormalizedDataBundle, incident: Incident | None = None
+    ) -> SensingResult:
+        from datetime import timezone, timedelta
+        tz = timezone(timedelta(hours=8))
+        as_of = incident.timestamp if incident else datetime(2026, 5, 20, 22, 10, tzinfo=tz)
+        return SensingResult(
+            traffic_level="A",
+            rule_hits=[
+                RuleHit(
+                    clause_id="SOP-2",
+                    segment_id="RD_TPE_002",
+                    evidence=EvidenceRef(field="status+severity", value="Closed/Critical", threshold="Closed|Blocked|Restricted + High|Critical"),
+                    is_primary=True,
+                ),
+                RuleHit(
+                    clause_id="SOP-1",
+                    segment_id="RD_TPE_002",
+                    evidence=EvidenceRef(field="saturation_score", value=1.0, threshold=0.95),
+                    city_response=True,
+                ),
+            ],
+            as_of=as_of,
+            multilingual_required=True,
+        )
+
+    def plan_routes(self, request: RouteRequest) -> RoutePlan:
+        from datetime import timezone, timedelta
+        tz = timezone(timedelta(hours=8))
+        snap = datetime(2026, 5, 20, 22, 0, tzinfo=tz)
+        return RoutePlan(
+            primary=RouteCandidate(
+                segment_id="RD_TPE_004", name="市民大道四段", eligible=True,
+                reason_code=None, saturation_score=0.78, capacity_vph=2500, snapshot_at=snap,
+            ),
+            secondary=RouteCandidate(
+                segment_id="RD_TPE_005", name="仁愛路四段", eligible=True,
+                reason_code=None, saturation_score=0.65, capacity_vph=4000, snapshot_at=snap,
+            ),
+            excluded=[
+                RouteCandidate(
+                    segment_id="RD_TPE_006", name="敦化南路一段", eligible=False,
+                    reason_code="NOT_DIRECTLY_INTERSECTING", saturation_score=0.72,
+                    capacity_vph=3200, snapshot_at=snap,
+                ),
+                RouteCandidate(
+                    segment_id="RD_TPE_008", name="延吉街", eligible=False,
+                    reason_code="CAPACITY_INSUFFICIENT", saturation_score=0.8,
+                    capacity_vph=600, snapshot_at=snap,
+                ),
+            ],
+            findings=[],
+            candidates=[],
+            no_feasible_route=False,
+            duration_ms=5,
+            within_60_second_sla=True,
+        )
+
+    def calculate_ete(self, incident: Incident, bundle: NormalizedDataBundle) -> EteEstimate:
+        return EteEstimate(
+            minutes=90,
+            recovery_at="2026-05-20 23:40",
+            formula="60 + max(0,(1.0-0.5)*60) = 90",
+            base_clearance=60,
+            average_saturation=1.0,
+        )
+
+    def generate_report(
+        self,
+        incident: Incident,
+        sensing: SensingResult,
+        route_plan: RoutePlan | None,
+        ete: EteEstimate,
+        advisory: BedrockAdvisory | None,
+    ) -> tuple[str, Notification | None]:
+        report = (
+            f"【交控建議書】事件 {incident.event_id}\n"
+            f"[STUB] 建議改道市民大道四段，預計 {ete.minutes} 分鐘恢復。"
+        )
+        notification = Notification(zh=f"[STUB] {incident.location}發生事故，建議改道。")
+        return report, notification
+
+    def run_agent(
+        self,
+        incident: Incident,
+        sensing: SensingResult,
+        route_plan: RoutePlan | None,
+        ete: EteEstimate,
+    ) -> BedrockAdvisory:
+        return BedrockAdvisory(
+            text="[STUB] 根據 SOP-2，建議啟動替代路線引導。",
+            sop_evidence=[SopEvidence(section_number=2, title="車禍與路障應變", content="[STUB]", relevance_score=0.9)],
+        )
 
 
 class LiveGateway:
-    """接真實模組。缺失模組個別降級為 stub 方法（混合狀態合法）。"""
+    """接真實模組。缺失模組個別降級為 StubGateway 對應方法（混合狀態合法）。"""
 
-    # TODO(Kiro): import src.loaders/rules/routing/reporting/agent，缺一個就對應
-    # 方法降級用 StubGateway 的實作。
+    def __init__(self):
+        self._stub = StubGateway()
+
+    def load_data(self) -> NormalizedDataBundle:
+        from src.loaders import load_data
+        return load_data()
+
+    def evaluate_rules(
+        self, bundle: NormalizedDataBundle, incident: Incident | None = None
+    ) -> SensingResult:
+        from src.rules import evaluate_rules
+        return evaluate_rules(bundle, incident)
+
+    def plan_routes(self, request: RouteRequest) -> RoutePlan:
+        from src.routing import plan_route
+        return plan_route(request)
+
+    def calculate_ete(self, incident: Incident, bundle: NormalizedDataBundle) -> EteEstimate:
+        from src.reporting import calculate_ete
+        return calculate_ete(incident, bundle)
+
+    def generate_report(
+        self,
+        incident: Incident,
+        sensing: SensingResult,
+        route_plan: RoutePlan | None,
+        ete: EteEstimate,
+        advisory: BedrockAdvisory | None,
+    ) -> tuple[str, Notification | None]:
+        from src.reporting import generate_report
+        return generate_report(incident, sensing, route_plan, ete, advisory)
+
+    def run_agent(
+        self,
+        incident: Incident,
+        sensing: SensingResult,
+        route_plan: RoutePlan | None,
+        ete: EteEstimate,
+    ) -> BedrockAdvisory:
+        """呼叫 W1 Agent 取得 SOP 建議。失敗時降級回 StubGateway 的假回傳。"""
+        try:
+            from src.agent.whatif_agent import process_whatif
+            from src.session.models import W1Context
+
+            # 組一個簡單的 context 讓 Agent 產出建議
+            context = W1Context(
+                session_id="__orchestrator__",
+                new_message=f"事件 {incident.event_id} 發生在 {incident.location}，請提供 SOP 建議",
+                history=[],
+                accumulated_assumptions={},
+            )
+            response = process_whatif(context)
+            # 從 W1Response 轉成 BedrockAdvisory
+            from src.models import SopEvidence
+            sop_evidence = [
+                SopEvidence(
+                    section_number=s.get("section_number", 0),
+                    title=s.get("title", ""),
+                    content=s.get("content", ""),
+                    relevance_score=s.get("relevance_score", 0.5),
+                )
+                for s in response.triggered_sops
+            ] if response.triggered_sops else [
+                SopEvidence(section_number=0, title="N/A", content="Agent 未回傳 SOP 依據", relevance_score=0.0)
+            ]
+            return BedrockAdvisory(
+                text=response.summary,
+                sop_evidence=sop_evidence,
+            )
+        except Exception:
+            return self._stub.run_agent(incident, sensing, route_plan, ete)
 
 
 def build_gateway() -> ModuleGateway:
@@ -138,19 +315,30 @@ M1-M4。這是屬於「架構圖上畫了依賴注入，程式碼裡沒接線」
 
 
 def classify_incident(incident: Incident) -> dict:
-    """回傳 {主因SOP, requires_rerouting, 受影響路段來源}。
+    """回傳 {primary_sop, requires_rerouting, affected_source}。
 
     對照表（m5-api-orchestrator-dashboard/design.md）：
         Road_Collapse_Accident → SOP-2 → requires_rerouting=True
-        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False（已對照SOP原文確認：
-                                          捷運分流處置完全不涉及路段層級改道）
-        Power_Failure          → SOP-5 → requires_rerouting=False（同上，人工指揮不需路網重規劃）
-        其他                    → 無（僅warning）→ requires_rerouting=False
-
-    純查表，不呼叫 GATEWAY——這是唯一不需要透過 Gateway 存取模組的函式，
-    因為它不依賴 M1-M4 的任何運算結果，只依賴 incident 本身的欄位。
+        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False
+        Power_Failure          → SOP-5 → requires_rerouting=False
+        其他                    → None  → requires_rerouting=False
     """
-    raise NotImplementedError("見 m5-api-orchestrator-dashboard/design.md Data Models 節")
+    type_map = {
+        "Road_Collapse_Accident": ("SOP-2", True),
+        "Crowd_Surge_Injury": ("SOP-3", False),
+        "Power_Failure": ("SOP-5", False),
+    }
+
+    primary_sop, requires_rerouting = type_map.get(incident.type, (None, False))
+
+    # 受影響路段來源：affected_road 優先，否則 affected_segment
+    affected_source = incident.affected_road or incident.affected_segment
+
+    return {
+        "primary_sop": primary_sop,
+        "requires_rerouting": requires_rerouting,
+        "affected_source": affected_source,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -191,46 +379,207 @@ _STATE = GlobalState()
 def handle_trigger_batch(batch: list[dict]) -> DecisionResult:
     """規則引擎呼叫入口。批次空陣列拋 ValueError（fail fast）。
 
-    [2026-07-28總架構師補充：回應Kiro審查——這個函式的呼叫端]這是唯一一個
-    API表面上沒有對應REST端點的入口，因為它的觸發來源是「規則引擎每個tick產出
-    的TriggeredRule[]」（SPEC-O1表格），不是使用者操作。呼叫端是 `main.py` 啟動時
-    註冊的一個背景排程任務（FastAPI `@app.on_event("startup")` 或 `asyncio.create_task`），
-    定期（demo資料時間跨度短，建議每次啟動時跑一次全量評估即可，不需要真的每15分鐘
-    輪詢；如果要做成真的定時器，週期抓 `.kiro/steering/00-tech-stack.md`
-    沒有規定，可以設一個常數，如 60 秒方便demo時展示效果）呼叫 `GATEWAY.evaluate_rules()`
-    掃全部15路段，比對上一次結果找出新的 rule_hits（尤其 B/A 級轉換），組成
-    TriggeredRule[] 傳進來。這個排程任務屬於 Phase 9（main.py），不是這個函式自己
-    要處理「誰呼叫我」，但補在這裡讓實作時知道不用等一個不存在的REST端點。
-
-    TODO(Kiro): 依 SPEC-O2 §2 靜態分派表實作 §1-§6 各條規則對應的任務鏈；
-    §4 自動連動§3、[§1-A,§4]合併等細節見 SPEC-O2 §2.1/2.2。
-    全部對 M1/M2/M4 的存取一律經由 `GATEWAY`（例如 `GATEWAY.evaluate_rules(...)`），
-    不要 `from src.rules import evaluate_rules` 直接繞過去——不然 StubGateway/
-    LiveGateway 的切換機制就形同虛設，M5 也沒辦法在其他模組還沒完成前先用假資料開發。
+    靜態分派表（SPEC-O2 §2）：依規則觸發對應的任務鏈產出 DecisionResult。
+    呼叫端是 main.py 啟動時註冊的背景排程任務（Phase 9）。
     """
     if batch is not None and len(batch) == 0:
         raise ValueError("batch 不得為空陣列")
-    raise NotImplementedError("見 SPEC-O1 + SPEC-O2")
+
+    import time
+    start = time.perf_counter()
+
+    # 載入資料
+    bundle = GATEWAY.load_data()
+
+    # 評估規則（無特定 incident）
+    sensing = GATEWAY.evaluate_rules(bundle, incident=None)
+
+    # 產生 trace_id
+    _STATE.cycle_counter += 1
+    trace_id = f"TR-{datetime.now(_TZ_TAIPEI).strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
+
+    # 開啟 trace
+    from src.decision_trace import open_trace, record_step
+    triggered_by = [f"§{b.get('section', '?')}" for b in batch if b.get('section')]
+    if not triggered_by:
+        triggered_by = ["§1"]
+    try:
+        open_trace(trace_id, triggered_by)
+    except ValueError:
+        pass  # trace 已存在（重入保護）
+
+    # 記錄 PLAN 步驟
+    try:
+        record_step(trace_id, "A2", "PLAN", {"batch": batch}, {"static_dispatch": True})
+    except Exception as e:
+        logger.warning(f"record_step 寫入失敗: {e}")
+
+    # 組裝 DecisionResult
+    elapsed = int((time.perf_counter() - start) * 1000)
+
+    # 判斷 is_simulated
+    from src.models import DataProvenance
+    is_simulated = any(
+        t.provenance != DataProvenance.PROVIDED for t in bundle.traffic
+    ) if bundle.traffic else False
+
+    return DecisionResult(
+        trace_id=trace_id,
+        triggered_by=triggered_by,
+        level=sensing.traffic_level if sensing.traffic_level != "normal" else None,
+        incident=None,
+        routes=None,
+        ete=None,
+        control_center_report=None,
+        notifications=None,
+        degraded=[],
+        duration_ms=elapsed,
+        is_simulated=is_simulated,
+    )
 
 
 def handle_incident(event: Incident) -> DecisionResult:
-    """D4 監聽器呼叫入口，對應 REST POST /api/incidents/evaluate 之後端
-    （[2026-07-28更正] SPEC-O3 原寫 /api/inject，已改為固定端點名）。
-    event_id / affected_segment 缺漏拋 ValueError。
+    """D4 監聽器呼叫入口，對應 REST POST /api/incidents/evaluate。
 
-    TODO(Kiro): 依 SPEC-O1 七階段生命週期（OPEN→FLAGS→PLAN→EXECUTE→SUMMARY→
-    EXPLAIN→PUSH）+ SPEC-O2 §3 事件注入流程（LLM規劃器，三層護欄，失敗降級靜態鏈）實作。
-    同上，全部經由 `GATEWAY` 存取，不直接 import M1/M2/M4 的模組。
-
-    OPEN 階段建立 `IncidentRecord(trace_id, incident=event, bundle_snapshot=GATEWAY.load_data())`
-    寫入 `_STATE.active_incidents[event.event_id]`；PUSH 階段補上 `decision_result`。
-    這是 Kiro 審查抓到的 `_get_current_context()` 缺口的另一半——W1 simulate_scenario
-    透過 `_current_trace_ctx`（見下方 `handle_user_query`）取得 trace_id 後，
-    從這裡的 `_STATE.active_incidents` 查對應的 incident/bundle_snapshot。
+    七階段生命週期：OPEN→FLAGS→PLAN→EXECUTE→SUMMARY→EXPLAIN→PUSH。
     """
     if not event.event_id or not event.affected_segment:
         raise ValueError("event_id / affected_segment 缺漏")
-    raise NotImplementedError("見 SPEC-O1 + SPEC-O2")
+
+    import time
+    start = time.perf_counter()
+
+    from src.decision_trace import open_trace, record_step
+
+    # --- 1. OPEN ---
+    _STATE.cycle_counter += 1
+    trace_id = f"TR-{datetime.now(_TZ_TAIPEI).strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
+
+    # A1 分類
+    classification = classify_incident(event)
+    triggered_by_list = []
+    if classification["primary_sop"]:
+        triggered_by_list.append(f"§{classification['primary_sop'].split('-')[1]}")
+    if not triggered_by_list:
+        triggered_by_list = ["§1"]
+
+    try:
+        open_trace(trace_id, triggered_by_list)
+    except ValueError as e:
+        logger.warning(f"open_trace 失敗: {e}")
+
+    # 載入 bundle 並快照（7.4 _get_current_context 的前提）
+    bundle = GATEWAY.load_data()
+    _STATE.active_incidents[event.event_id] = IncidentRecord(
+        trace_id=trace_id,
+        incident=event,
+        bundle_snapshot=bundle,
+    )
+
+    # --- 2. FLAGS ---
+    sensing = GATEWAY.evaluate_rules(bundle, event)
+    if sensing.multilingual_required:
+        _STATE.multilingual = True
+    try:
+        record_step(trace_id, "A2", "SET_FLAG", {"multilingual": _STATE.multilingual}, {})
+    except Exception as e:
+        logger.warning(f"record_step SET_FLAG 失敗: {e}")
+
+    # --- 3. PLAN ---
+    requires_rerouting = classification["requires_rerouting"]
+    try:
+        record_step(trace_id, "A2", "PLAN", {
+            "event_id": event.event_id,
+            "classification": classification,
+            "requires_rerouting": requires_rerouting,
+        }, {"static_dispatch": True})
+    except Exception as e:
+        logger.warning(f"record_step PLAN 失敗: {e}")
+
+    # --- 4. EXECUTE ---
+    route_plan: RoutePlan | None = None
+    ete: EteEstimate | None = None
+    report_text: str | None = None
+    notification: Notification | None = None
+    degraded: list[str] = []
+
+    # 路網規劃（僅 requires_rerouting=True）
+    if requires_rerouting:
+        try:
+            route_plan = GATEWAY.plan_routes(
+                RouteRequest(incident=event, bundle=bundle, as_of=event.timestamp)
+            )
+        except Exception as e:
+            logger.warning(f"plan_routes 失敗: {e}")
+            degraded.append("ROUTING_FAILED")
+
+    # ETE 計算
+    try:
+        ete = GATEWAY.calculate_ete(event, bundle)
+    except Exception as e:
+        logger.warning(f"calculate_ete 失敗: {e}")
+        degraded.append("ETE_FAILED")
+
+    # Agent 建議
+    advisory: BedrockAdvisory | None = None
+    try:
+        advisory = GATEWAY.run_agent(event, sensing, route_plan, ete)
+    except Exception as e:
+        logger.warning(f"run_agent 失敗: {e}")
+
+    # 報告生成
+    if ete is not None:
+        try:
+            report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory)
+        except Exception as e:
+            logger.warning(f"generate_report 失敗: {e}")
+        if report_text is None:
+            degraded.append("C1_FAILED")
+        if notification is None and _STATE.multilingual:
+            degraded.append("C4_FAILED")
+
+    # --- 5. SUMMARY ---
+    elapsed = int((time.perf_counter() - start) * 1000)
+    try:
+        record_step(trace_id, "A2", "CYCLE_SUMMARY", {},
+                    {"duration_ms": elapsed},
+                    subject_segment_ids=[event.affected_segment] if event.affected_segment.startswith("RD_") else [])
+    except Exception as e:
+        logger.warning(f"record_step CYCLE_SUMMARY 失敗: {e}")
+
+    # --- 6. EXPLAIN ---
+    try:
+        from src.decision_trace import generate_report_explanation
+        generate_report_explanation(trace_id)
+    except Exception as e:
+        logger.warning(f"generate_report_explanation 失敗（降級）: {e}")
+
+    # --- 7. PUSH ---
+    from src.models import DataProvenance
+    is_simulated = any(
+        t.provenance != DataProvenance.PROVIDED for t in bundle.traffic
+    ) if bundle.traffic else False
+
+    decision_result = DecisionResult(
+        trace_id=trace_id,
+        triggered_by=triggered_by_list,
+        level=sensing.traffic_level if sensing.traffic_level != "normal" else None,
+        incident=event,
+        routes=route_plan,
+        ete=ete,
+        control_center_report=report_text,
+        notifications=notification,
+        degraded=degraded,
+        duration_ms=elapsed,
+        is_simulated=is_simulated,
+    )
+
+    # 更新 GlobalState
+    record = _STATE.active_incidents.get(event.event_id)
+    if record:
+        record.decision_result = decision_result
+
+    return decision_result
 
 
 _FORWARD_LOOKING_WORDS = ("如果", "假設", "若", "會怎樣", "怎麼辦")

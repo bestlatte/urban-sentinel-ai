@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -36,11 +38,22 @@ class SopMatch:
 def load_sop_data() -> dict[int, SopSection]:
     """系統啟動時載入 data/emergency_traffic_sop.json，key 為 section_number。
 
-    TODO(Kiro): 讀檔失敗時直接報錯終止（design.md §8：這是不可恢復的錯誤，
+    讀檔失敗時直接報錯終止（design.md §8：這是不可恢復的錯誤，
     不同於查詢失敗可以降級）。
     """
-    raise NotImplementedError("見 K3-sop-rag/design.md 第六節")
+    path = Path(__file__).resolve().parents[2] / "data" / "emergency_traffic_sop.json"
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    return {
+        section["section_number"]: SopSection(
+            section_number=section["section_number"],
+            title=section["title"],
+            content=section["content"],
+        )
+        for section in raw["sections"]
+    }
 
 
-SOP_DATA: dict[int, SopSection] = {}
+SOP_DATA: dict[int, SopSection] = load_sop_data()
 """啟動時由 load_sop_data() 填入，全域使用。"""

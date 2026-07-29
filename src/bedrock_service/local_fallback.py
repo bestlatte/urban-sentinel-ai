@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from src.bedrock_service.sop_data import SopMatch
+from src.bedrock_service.sop_data import SOP_DATA, SopMatch
 
 KEYWORD_MAP: dict[int, list[str]] = {
     1: ["飽和", "擁塞", "A級", "B級", "紅燈", "黃燈", "級別", "Saturation"],
@@ -24,7 +24,29 @@ RELEVANCE_THRESHOLD = 0.3
 def query_local(question: str) -> list[SopMatch]:
     """關鍵字命中比對，取前 3、過濾低於 RELEVANCE_THRESHOLD 的。
 
-    TODO(Kiro): 依 design.md 第四節「比對邏輯」實作：
-    score = hit_count / len(keywords)，依分數排序取前3。
+    score = hit_count / len(keywords)，依分數降序排序取前 3。
     """
-    raise NotImplementedError("見 K3-sop-rag/design.md 第四節")
+    question_lower = question.lower()
+    scores: dict[int, float] = {}
+
+    for section_number, keywords in KEYWORD_MAP.items():
+        hit_count = sum(1 for kw in keywords if kw.lower() in question_lower)
+        if hit_count > 0:
+            scores[section_number] = hit_count / len(keywords)
+
+    # 依分數降序，取前 3
+    sorted_sections = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:3]
+
+    results: list[SopMatch] = []
+    for section_number, score in sorted_sections:
+        if score < RELEVANCE_THRESHOLD:
+            continue
+        section = SOP_DATA[section_number]
+        results.append(SopMatch(
+            section_number=section.section_number,
+            title=section.title,
+            content=section.content,
+            relevance_score=round(score, 3),
+        ))
+
+    return results

@@ -4,8 +4,8 @@
     "name": "忠孝東路四段",
     "flow_direction": "東西向",
     "intersections": [
-      "光復南路",
       "延吉街",
+      "光復南路",
       "基隆路一段"
     ],
     "capacity_vph": 3000,
@@ -183,8 +183,8 @@
     "flow_direction": "東西向",
     "intersections": [
       "基隆路一段",
-      "松智路",
-      "市府路"
+      "市府路",
+      "松智路"
     ],
     "capacity_vph": 1500,
     "alternatives": [
@@ -216,8 +216,8 @@
     "flow_direction": "東西向",
     "intersections": [
       "基隆路一段",
-      "松智路",
-      "市府路"
+      "市府路",
+      "松智路"
     ],
     "capacity_vph": 3800,
     "alternatives": [

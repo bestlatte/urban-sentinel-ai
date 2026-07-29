@@ -1,30 +1,51 @@
-"""對應 m4-explanation-chain-and-orchestrator/SPEC-O1/O2/O3 全部驗收測試 +
-m5-api-orchestrator-dashboard/design.md 的 30 個 Correctness Properties
-（用 hypothesis 性質測試，見該文件「Testing Strategy」節）。
+"""Orchestrator 整合測試：三分支路由 + 黃金值回歸 + message_type 正確性。"""
 
-本檔先列核心回歸測試；30個Property的完整套件由 Kiro 依 design.md 逐一實作
-（每個測試函式標註 `# Feature: m5-orchestrator-dashboard, Property {n}: {text}`）。
-"""
+import os
+os.environ.setdefault("USE_BEDROCK", "false")
 
-import pytest
+from fastapi.testclient import TestClient
+from main import app
 
 
 def test_post_what_if_routes_to_whatif_for_hypothetical_question():
-    pytest.skip("TODO(Kiro): 依 SPEC-O3 §4 驗收測試 #1 實作")
+    """SPEC-O3 §4：含前瞻詞 → whatif.evaluated.v1。"""
+    with TestClient(app) as client:
+        r = client.post("/api/what-if", json={"session_id": "s1", "content": "如果BL17到40000", "correlation_id": "c1"})
+        d = r.json()
+        assert d["status"] == "ok"
+        assert d["message_type"] == "whatif.evaluated.v1"
 
 
 def test_post_what_if_routes_to_trace_answer_for_retrospective_question():
-    """回歸測試：回溯追問分支回傳 trace.answered.v1/TraceAnswer，
-    不是硬塞進 WhatIfResult（本次審查新增的正確設計）。"""
-    pytest.skip("TODO(Kiro): 依 SPEC-O3 §4 驗收測試 #2 + m5-api-orchestrator-dashboard R2.5a 實作")
+    """回溯追問（無前瞻詞 + 無 trace_id）→ trace.answered.v1 + 固定引導文字。"""
+    with TestClient(app) as client:
+        r = client.post("/api/what-if", json={"session_id": "s2", "content": "目前狀況如何", "correlation_id": "c2"})
+        d = r.json()
+        assert d["status"] == "ok"
+        assert d["message_type"] == "trace.answered.v1"
+        assert "trace_id" in d["payload"]
 
 
 def test_decision_completed_message_type_not_decision_result():
-    """回歸測試：WS推播完整DecisionResult用 decision.completed.v1，
-    不是 SPEC-O3 早期版本寫的 decision.result.v1（兩份文件曾經對同一事件用不同名字）。"""
-    pytest.skip("TODO(Kiro): 依 04-system-architecture.md §5 總表實作")
+    """WS 推播用 decision.completed.v1，不是 decision.result.v1。"""
+    with TestClient(app) as client:
+        r = client.post("/api/incidents/evaluate", json={"event_id": "TPE_2026_ACC_001"})
+        d = r.json()
+        assert d["message_type"] == "decision.completed.v1"
+        assert "decision.result.v1" != d["message_type"]
 
 
 def test_acc001_golden_regression_full_pipeline():
     """ACC_001 全流程：主004/次005/排除006、008/ETE 90分/恢復23:40。"""
-    pytest.skip("TODO(Kiro): 依 SPEC-O2 驗收測試表「黃金值回歸」實作")
+    with TestClient(app) as client:
+        r = client.post("/api/incidents/evaluate", json={"event_id": "TPE_2026_ACC_001"})
+        d = r.json()
+        assert d["status"] == "ok"
+        p = d["payload"]
+        assert p["ete"]["minutes"] == 90
+        assert p["ete"]["recovery_at"] == "2026-05-20 23:40"
+        assert p["routes"]["primary"]["segment_id"] == "RD_TPE_004"
+        assert p["routes"]["secondary"]["segment_id"] == "RD_TPE_005"
+        excluded_ids = {e["segment_id"] for e in p["routes"]["excluded"]}
+        assert "RD_TPE_006" in excluded_ids
+        assert "RD_TPE_008" in excluded_ids

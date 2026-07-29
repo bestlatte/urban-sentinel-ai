@@ -1,2 +1,67 @@
-/* 輸入框、送出按鈕、快捷問題。參考 spec：F6-chat-ui/design.md 第四節(4.7)、第三節(quick-q)。
-   TODO(Kiro): locked 狀態灰化樣式、.quick-q pill 形按鈕。 */
+/* 輸入框、送出按鈕、快捷問題。 */
+
+.chat-input-area {
+  padding: 12px 16px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.chat-input-area input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.chat-input-area input:focus {
+  border-color: var(--chat-primary);
+}
+
+.chat-input-area input:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.chat-input-area button {
+  padding: 10px 16px;
+  background: var(--chat-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
+.chat-input-area button:disabled {
+  background: #94a3b8;
+  cursor: not-allowed;
+}
+
+.chat-quick-questions {
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-q {
+  padding: 6px 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  font-size: 0.75rem;
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.quick-q:hover {
+  background: #e2e8f0;
+}

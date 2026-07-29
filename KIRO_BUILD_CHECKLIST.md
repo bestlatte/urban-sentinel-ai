@@ -50,96 +50,96 @@
 
 ### Phase 0：基礎型別（已由總架構師完整實作，Kiro 的任務是覆核，不是重寫）
 
-- [ ] **0.1** 覆核 `src/models.py`：對照 `.kiro/steering/02-data-contract.md`、各模組 spec，確認沒有 `[INFERRED]` 標記的欄位跟你即將要寫的邏輯對不上；跑 `pytest tests/test_models.py` 確認 4 條全過。
-- [ ] **0.2** [2026-07-28已定案，見Kiro第一輪審查回覆] `KpiSummary`、`differences_from_base` 已定案（見 §2.3 KPI定義、`whatif_engine.diff_from_base()` docstring）；`EvidenceRef` 仍是 `[INFERRED]`，實作到 Phase 1（P4規則引擎）時如發現形狀不夠用才回報。
+- [x] **0.1** 覆核 `src/models.py`：對照 `.kiro/steering/02-data-contract.md`、各模組 spec，確認沒有 `[INFERRED]` 標記的欄位跟你即將要寫的邏輯對不上；跑 `pytest tests/test_models.py` 確認 4 條全過。
+- [x] **0.2** [2026-07-28已定案，見Kiro第一輪審查回覆] `KpiSummary`、`differences_from_base` 已定案（見 §2.3 KPI定義、`whatif_engine.diff_from_base()` docstring）；`EvidenceRef` 仍是 `[INFERRED]`，實作到 Phase 1（P4規則引擎）時如發現形狀不夠用才回報。
 
 ### Phase 1：M1 資料感知與規則（零外部依賴的純函式）
 
-- [ ] **1.1** `src/loaders.py`（D1-D4）+ `tests/test_loaders.py`。Spec：`.kiro/specs/m1-data-ingestion/requirements.md` 全文。特別注意真實 CSV 的 `%` 字串解析（測試#1/#2）。
-- [ ] **1.2** `src/rules.py`（P1-P5）+ `tests/test_rules.py`。同一份 spec。特別注意 SOP-1 全15路段分級 vs 城市應變觸發限定2段的區分（測試#6/#6b 都要留著）。
+- [x] **1.1** `src/loaders.py`（D1-D4）+ `tests/test_loaders.py`。Spec：`.kiro/specs/m1-data-ingestion/requirements.md` 全文。特別注意真實 CSV 的 `%` 字串解析（測試#1/#2）。
+- [x] **1.2** `src/rules.py`（P1-P5）+ `tests/test_rules.py`。同一份 spec。特別注意 SOP-1 全15路段分級 vs 城市應變觸發限定2段的區分（測試#6/#6b 都要留著）。
 
 ### Phase 2：M2 路網規劃（純函式，依賴 Phase 1 的型別但不依賴其實作）
 
-- [ ] **2.1** `src/routing.py` 的 `plan_route()`（R1-R5）+ `tests/test_routing.py`。Spec：`.kiro/specs/m2-incident-routing/模組2C_本機路網重規劃引擎_第一階段Spec.md` 第4-6節。九種 `ReasonCode` 用 `SPEC-00` §3.3 的命名。
-- [ ] **2.2** `src/routing.py` 的 `count_affected_intersections()`（`COUNT_INTERSECTIONS`）。同一份 spec 檔頭補註。
-- [ ] **2.3** [2026-07-28已定案，回應Kiro審查] `data/display_geometry.json` 已由總架構師產出（15路段的示意座標，viewBox 0 0 800 600，邏輯見檔案內 `$comment`），覆核即可，如果團隊對版面配置有意見可以調整座標值，但不要整個重新設計座標系統。
+- [x] **2.1** `src/routing.py` 的 `plan_route()`（R1-R5）+ `tests/test_routing.py`。Spec：`.kiro/specs/m2-incident-routing/模組2C_本機路網重規劃引擎_第一階段Spec.md` 第4-6節。九種 `ReasonCode` 用 `SPEC-00` §3.3 的命名。
+- [x] **2.2** `src/routing.py` 的 `count_affected_intersections()`（`COUNT_INTERSECTIONS`）。同一份 spec 檔頭補註。
+- [x] **2.3** [2026-07-28已定案，回應Kiro審查] `data/display_geometry.json` 已由總架構師產出（15路段的示意座標，viewBox 0 0 800 600，邏輯見檔案內 `$comment`），覆核即可，如果團隊對版面配置有意見可以調整座標值，但不要整個重新設計座標系統。
 
 ### Phase 3：M4 ETE 與報告生成
 
-- [ ] **3.1** `src/reporting.py` 的 `calculate_ete()` + 對應測試。Spec：`.kiro/specs/m4-decision-reporting/requirements.md` 第二節。三筆黃金值（90/70/41分）精確斷言。
-- [ ] **3.2** `src/reporting.py` 的 `generate_report()`（C1-C4）+ 對應測試。同一份 spec 第三節；提示詞讀 `prompts/report.txt` + `prompts/notification.txt`，不要硬編在程式碼裡。
+- [x] **3.1** `src/reporting.py` 的 `calculate_ete()` + 對應測試。Spec：`.kiro/specs/m4-decision-reporting/requirements.md` 第二節。三筆黃金值（90/70/41分）精確斷言。
+- [x] **3.2** `src/reporting.py` 的 `generate_report()`（C1-C4）+ 對應測試。同一份 spec 第三節；提示詞讀 `prompts/report.txt` + `prompts/notification.txt`，不要硬編在程式碼裡。
 
 ### Phase 4：M3 子套件（本機優先，雲端疊加）
 
-- [ ] **4.1** `src/bedrock_service/sop_data.py`（SOP JSON 預載）。Spec：`.kiro/specs/m3-bedrock-advisor/K3-sop-rag/design.md` 第六節。
-- [ ] **4.2** `src/bedrock_service/local_fallback.py`（本機關鍵字比對，`KEYWORD_MAP` 已經是完整資料，只需實作比對函式）+ `tests/test_sop_retriever.py` 的本機部分。同一份 spec 第四節。
-- [ ] **4.3** `src/bedrock_service/bedrock_kb.py`（雲端呼叫）。同一份 spec 第三節。**需要 AWS Bedrock model access 已開通**，未開通前可以先跳過，不影響 4.4。
-- [ ] **4.4** `src/bedrock_service/sop_retriever.py`（`query_sop()` 主邏輯 + 模式切換，含 `try/except` 真的退化）+ 補完 `tests/test_sop_retriever.py` 剩餘測試。同一份 spec 第五節。
-- [ ] **4.5** `src/session/models.py` 覆核（已是完整 dataclass，不太需要改動）。
-- [ ] **4.6** `src/session/session_manager.py`（`handle_message`/`record_response`/`clear_session`）+ `tests/test_session_manager.py`。Spec：`.kiro/specs/m3-bedrock-advisor/W2-session-manager/design.md`。
+- [x] **4.1** `src/bedrock_service/sop_data.py`（SOP JSON 預載）。Spec：`.kiro/specs/m3-bedrock-advisor/K3-sop-rag/design.md` 第六節。
+- [x] **4.2** `src/bedrock_service/local_fallback.py`（本機關鍵字比對，`KEYWORD_MAP` 已經是完整資料，只需實作比對函式）+ `tests/test_sop_retriever.py` 的本機部分。同一份 spec 第四節。
+- [x] **4.3** `src/bedrock_service/bedrock_kb.py`（雲端呼叫）。同一份 spec 第三節。**需要 AWS Bedrock model access 已開通**，未開通前可以先跳過，不影響 4.4。
+- [x] **4.4** `src/bedrock_service/sop_retriever.py`（`query_sop()` 主邏輯 + 模式切換，含 `try/except` 真的退化）+ 補完 `tests/test_sop_retriever.py` 剩餘測試。同一份 spec 第五節。
+- [x] **4.5** `src/session/models.py` 覆核（已是完整 dataclass，不太需要改動）。
+- [x] **4.6** `src/session/session_manager.py`（`handle_message`/`record_response`/`clear_session`）+ `tests/test_session_manager.py`。Spec：`.kiro/specs/m3-bedrock-advisor/W2-session-manager/design.md`。
 
 ### Phase 5：解釋鏈記錄與生成層
 
-- [ ] **5.1** `src/decision_trace.py` 的 `open_trace()`/`record_step()`。Spec：`.kiro/specs/m4-explanation-chain-and-orchestrator/SPEC-M4A_解釋鏈_記錄層.md` 第4節，含全部十項驗收測試。
-- [ ] **5.2** `src/decision_trace.py` 的 `resolve_segment_id()`/`generate_report_explanation()`/`answer_trace_query()`。Spec：`SPEC-M4B_解釋鏈_生成層.md`。
+- [x] **5.1** `src/decision_trace.py` 的 `open_trace()`/`record_step()`。Spec：`.kiro/specs/m4-explanation-chain-and-orchestrator/SPEC-M4A_解釋鏈_記錄層.md` 第4節，含全部十項驗收測試。
+- [x] **5.2** `src/decision_trace.py` 的 `resolve_segment_id()`/`generate_report_explanation()`/`answer_trace_query()`。Spec：`SPEC-M4B_解釋鏈_生成層.md`。
 
 ### Phase 6：What-if 覆寫重算引擎（依賴 Phase 1-3 的純函式都已完成）
 
-- [ ] **6.1** `src/whatif_engine.py` 的 `apply_scenario_overrides()`。entity 前綴（`BS_`/`RD_`）對應到 bundle 哪個欄位，實作時逐一核對 `.kiro/steering/02-data-contract.md` §2-3 的欄位表（找不到對應 entity 要拋 ValueError，不要靜默忽略）。
-- [ ] **6.1b** `src/whatif_engine.py` 的 `diff_from_base()`（`WhatIfResult.differences_from_base` 的計算邏輯，已定案：固定比對 traffic_level/ete.minutes/主次路線segment_id/觸發SOP clause_id集合四項，見函式docstring）。
-- [ ] **6.2** `src/whatif_engine.py` 的 `run_scenario()` 覆核——確認呼叫的是 `gateway.evaluate_rules()`/`gateway.plan_routes()`/`gateway.calculate_ete()`（透過 Gateway），不是直接 import Phase 1-3 的函式。
+- [x] **6.1** `src/whatif_engine.py` 的 `apply_scenario_overrides()`。entity 前綴（`BS_`/`RD_`）對應到 bundle 哪個欄位，實作時逐一核對 `.kiro/steering/02-data-contract.md` §2-3 的欄位表（找不到對應 entity 要拋 ValueError，不要靜默忽略）。
+- [x] **6.1b** `src/whatif_engine.py` 的 `diff_from_base()`（`WhatIfResult.differences_from_base` 的計算邏輯，已定案：固定比對 traffic_level/ete.minutes/主次路線segment_id/觸發SOP clause_id集合四項，見函式docstring）。
+- [x] **6.2** `src/whatif_engine.py` 的 `run_scenario()` 覆核——確認呼叫的是 `gateway.evaluate_rules()`/`gateway.plan_routes()`/`gateway.calculate_ete()`（透過 Gateway），不是直接 import Phase 1-3 的函式。
 
 ### Phase 7：W1 Agent（依賴 Phase 4 的 K3、Phase 6 的 whatif_engine）
 
-- [ ] **7.1** 確認 `src/agent/system_prompt.py` 能正確讀到 `prompts/advisor.txt`（已是完整實作，跑一次 import 驗證即可）。
-- [ ] **7.2** `src/agent/loading.py` 的 loading 步驟推播邏輯（方案B兩段式，見 design.md 第十一節）。
-- [ ] **7.3** `src/agent/tools.py` 的 `query_sop`（已接好 `bedrock_service`，覆核即可）。
-- [ ] **7.4** `src/agent/tools.py` 的 `_get_current_context()`。[2026-07-28已定案] 已實作：透過 `orchestrator._current_trace_ctx`（contextvar，由 `handle_user_query()` 設定）取得 trace_id，查 `GlobalState.active_incidents` 找對應 `IncidentRecord`；trace_id為None時只回傳 `(None, GATEWAY.load_data())`。覆核程式碼即可，不用重新設計。依賴 Phase 8.1-8.6 的 `GlobalState`/`GATEWAY` 先做完。
-- [ ] **7.5** `src/agent/response_formatter.py` 的 `format_response()`。Spec：`W1-whatif-agent/design.md` 第七、八節。
-- [ ] **7.6** `src/agent/whatif_agent.py` 全部函式（`create_whatif_agent`/`_build_prompt`/`process_whatif`/`process_whatif_request`）。同一份 spec 第五、六、十節。**需要 Strands SDK 已安裝、Bedrock model access 已開通**。
+- [x] **7.1** 確認 `src/agent/system_prompt.py` 能正確讀到 `prompts/advisor.txt`（已是完整實作，跑一次 import 驗證即可）。
+- [x] **7.2** `src/agent/loading.py` 的 loading 步驟推播邏輯（方案B兩段式，見 design.md 第十一節）。
+- [x] **7.3** `src/agent/tools.py` 的 `query_sop`（已接好 `bedrock_service`，覆核即可）。
+- [x] **7.4** `src/agent/tools.py` 的 `_get_current_context()`。[2026-07-28已定案] 已實作：透過 `orchestrator._current_trace_ctx`（contextvar，由 `handle_user_query()` 設定）取得 trace_id，查 `GlobalState.active_incidents` 找對應 `IncidentRecord`；trace_id為None時只回傳 `(None, GATEWAY.load_data())`。覆核程式碼即可，不用重新設計。依賴 Phase 8.1-8.6 的 `GlobalState`/`GATEWAY` 先做完。
+- [x] **7.5** `src/agent/response_formatter.py` 的 `format_response()`。Spec：`W1-whatif-agent/design.md` 第七、八節。
+- [x] **7.6** `src/agent/whatif_agent.py` 全部函式（`create_whatif_agent`/`_build_prompt`/`process_whatif`/`process_whatif_request`）。同一份 spec 第五、六、十節。**需要 Strands SDK 已安裝、Bedrock model access 已開通**。
 
 ### Phase 8：Orchestrator（依賴前面全部模組）
 
-- [ ] **8.1** `src/orchestrator.py` 的 `StubGateway` 全部方法（[2026-07-28已定案] 固定用 ACC_001 黃金情境反推假資料，見 `StubGateway` docstring 裡每個方法要回什麼值，不要自己編一組跟黃金值對不上的數字）。Spec：`m5-api-orchestrator-dashboard/design.md` 第2節。
-- [ ] **8.2** `src/orchestrator.py` 的 `LiveGateway` 全部方法（串接 Phase 1-4 的真實模組）。同一份 spec。**注意**：`ModuleGateway` 已移除 `parse_whatif`/`narrate_whatif` 兩個方法（跟W1實際的Strands Agent設計重複、從未被呼叫，已刪除，不要實作它們）。
-- [ ] **8.3** `src/orchestrator.py` 的 `classify_incident()`（A1）。已對照真實SOP文字確認過對照表，直接照 docstring 實作即可，不需要重新設計。
-- [ ] **8.4** `src/orchestrator.py` 的 `handle_trigger_batch()`（規則觸發靜態分派表）。Spec：`SPEC-O2` §2。**呼叫端已定案**：這個函式沒有對應REST端點，由 Phase 9 在 `main.py` 啟動時註冊的背景排程任務呼叫（見函式docstring），不是bug，Phase 9 會補上呼叫端。
-- [ ] **8.5** `src/orchestrator.py` 的 `handle_incident()`（七階段生命週期）。Spec：`SPEC-O1` 全文 + `SPEC-O2` §3（事件注入LLM規劃器）。OPEN階段要寫入 `_STATE.active_incidents[event.event_id] = IncidentRecord(trace_id=..., incident=event, bundle_snapshot=GATEWAY.load_data())`（見 `IncidentRecord`/`GlobalState` dataclass 定義），這是 7.4 能運作的前提。
-- [ ] **8.6** `src/orchestrator.py` 的 `get_global_state()`/`reset()`。[2026-07-28已定案] 已實作完成（回傳/重置模組層級的 `_STATE`），覆核即可不用重寫。
-- [ ] **8.7** 覆核 `handle_user_query()`（三分支路由邏輯、`_current_trace_ctx.set()` 已經是完整實作，這裡只需確認跟 Phase 7 的 W1、Phase 5 的 M4B 接得起來）。
+- [x] **8.1** `src/orchestrator.py` 的 `StubGateway` 全部方法（[2026-07-28已定案] 固定用 ACC_001 黃金情境反推假資料，見 `StubGateway` docstring 裡每個方法要回什麼值，不要自己編一組跟黃金值對不上的數字）。Spec：`m5-api-orchestrator-dashboard/design.md` 第2節。
+- [x] **8.2** `src/orchestrator.py` 的 `LiveGateway` 全部方法（串接 Phase 1-4 的真實模組）。同一份 spec。**注意**：`ModuleGateway` 已移除 `parse_whatif`/`narrate_whatif` 兩個方法（跟W1實際的Strands Agent設計重複、從未被呼叫，已刪除，不要實作它們）。
+- [x] **8.3** `src/orchestrator.py` 的 `classify_incident()`（A1）。已對照真實SOP文字確認過對照表，直接照 docstring 實作即可，不需要重新設計。
+- [x] **8.4** `src/orchestrator.py` 的 `handle_trigger_batch()`（規則觸發靜態分派表）。Spec：`SPEC-O2` §2。**呼叫端已定案**：這個函式沒有對應REST端點，由 Phase 9 在 `main.py` 啟動時註冊的背景排程任務呼叫（見函式docstring），不是bug，Phase 9 會補上呼叫端。
+- [x] **8.5** `src/orchestrator.py` 的 `handle_incident()`（七階段生命週期）。Spec：`SPEC-O1` 全文 + `SPEC-O2` §3（事件注入LLM規劃器）。OPEN階段要寫入 `_STATE.active_incidents[event.event_id] = IncidentRecord(trace_id=..., incident=event, bundle_snapshot=GATEWAY.load_data())`（見 `IncidentRecord`/`GlobalState` dataclass 定義），這是 7.4 能運作的前提。
+- [x] **8.6** `src/orchestrator.py` 的 `get_global_state()`/`reset()`。[2026-07-28已定案] 已實作完成（回傳/重置模組層級的 `_STATE`），覆核即可不用重寫。
+- [x] **8.7** 覆核 `handle_user_query()`（三分支路由邏輯、`_current_trace_ctx.set()` 已經是完整實作，這裡只需確認跟 Phase 7 的 W1、Phase 5 的 M4B 接得起來）。
 
 ### Phase 9：外殼（依賴前面全部模組）
 
-- [ ] **9.1** `src/ws_manager.py` 的 `ConnectionManager` 全部方法。
-- [ ] **9.2** `main.py` 的 `GET /api/dashboard`。
-- [ ] **9.3** `main.py` 的 `POST /api/incidents/evaluate`。
-- [ ] **9.4** `main.py` 的 `POST /api/what-if`（三分支回應形狀，見 `.kiro/steering/04-system-architecture.md` §5）。
-- [ ] **9.5** `main.py` 的 `GET /api/health`。
-- [ ] **9.6** `main.py` 的 `unified_exception_handler` 內容（骨架已掛上，補完錯誤碼映射邏輯）。
-- [ ] **9.7** `main.py` 的 7 個 WebSocket 廣播時機接入 `orchestrator.py`／`ws_manager.py`（見 `04-system-architecture.md` §5 總表）。
-- [ ] **9.8** [2026-07-28新增，回應Kiro審查] `main.py` 註冊背景排程任務（`@app.on_event("startup")` 或 `asyncio.create_task`），定期呼叫 `GATEWAY.evaluate_rules()` 掃全部路段、比對上次結果找新的 rule_hits（尤其B/A級轉換），組成 `TriggeredRule[]` 呼叫 `orchestrator.handle_trigger_batch()`——這是 8.4 的唯一呼叫端，demo資料時間跨度短，先求「啟動時跑一次」能動即可，不強求真的定時輪詢。
+- [x] **9.1** `src/ws_manager.py` 的 `ConnectionManager` 全部方法。
+- [x] **9.2** `main.py` 的 `GET /api/dashboard`。
+- [x] **9.3** `main.py` 的 `POST /api/incidents/evaluate`。
+- [x] **9.4** `main.py` 的 `POST /api/what-if`（三分支回應形狀，見 `.kiro/steering/04-system-architecture.md` §5）。
+- [x] **9.5** `main.py` 的 `GET /api/health`。
+- [x] **9.6** `main.py` 的 `unified_exception_handler` 內容（骨架已掛上，補完錯誤碼映射邏輯）。
+- [x] **9.7** `main.py` 的 7 個 WebSocket 廣播時機接入 `orchestrator.py`／`ws_manager.py`（見 `04-system-architecture.md` §5 總表）。
+- [x] **9.8** [2026-07-28新增，回應Kiro審查] `main.py` 註冊背景排程任務（`@app.on_event("startup")` 或 `asyncio.create_task`），定期呼叫 `GATEWAY.evaluate_rules()` 掃全部路段、比對上次結果找新的 rule_hits（尤其B/A級轉換），組成 `TriggeredRule[]` 呼叫 `orchestrator.handle_trigger_batch()`——這是 8.4 的唯一呼叫端，demo資料時間跨度短，先求「啟動時跑一次」能動即可，不強求真的定時輪詢。
 
 ### Phase 10：前端（後端資料形狀穩定後才做，由小到大：工具函式→狀態→渲染→頁面組裝）
 
-- [ ] **10.1** `frontend/css/*.css` 全部 6 個檔案（`chat-variables.css` 已完整，其餘覆核並補完）。
-- [ ] **10.2** `frontend/js/chat-utils.js`（`escapeHtml`/`formatTime`）。
-- [ ] **10.3** `frontend/js/chat-state.js`（`ChatState` + 收合/拖拉，design.md 已有完整程式碼可抄）。
-- [ ] **10.4** `frontend/js/chat-render.js`（渲染函式，design.md 已有完整程式碼可抄，注意B級用橘色不是黃色）。
-- [ ] **10.5** `frontend/js/api.js`（Fetch 四端點）。
-- [ ] **10.6** `frontend/js/ws.js`（連線 + message_type 分派）。
-- [ ] **10.7** `frontend/js/chat-app.js`（`sendMessage()` 呼叫 REST，不是WS）。
-- [ ] **10.8** `frontend/js/charts.js`。
-- [ ] **10.9** `frontend/js/map.js`。
-- [ ] **10.10** `frontend/js/app.js`（KPI/F7分頁/F2彈窗/F5報告卡片，[待確認]項目見 `index.html` 內補註的業界通用版原型，可依團隊意見調整版面但資料形狀不能變）。
-- [ ] **10.11** `frontend/index.html` 最終走查——所有 `<script>`/`<link>` 路徑正確、六分區+F6面板都對應到已完成的JS函式。
-- [ ] **10.12** 手動下載 Chart.js 放進 `frontend/vendor/`（見該資料夾 README）。
+- [x] **10.1** `frontend/css/*.css` 全部 6 個檔案（`chat-variables.css` 已完整，其餘覆核並補完）。
+- [x] **10.2** `frontend/js/chat-utils.js`（`escapeHtml`/`formatTime`）。
+- [x] **10.3** `frontend/js/chat-state.js`（`ChatState` + 收合/拖拉，design.md 已有完整程式碼可抄）。
+- [x] **10.4** `frontend/js/chat-render.js`（渲染函式，design.md 已有完整程式碼可抄，注意B級用橘色不是黃色）。
+- [x] **10.5** `frontend/js/api.js`（Fetch 四端點）。
+- [x] **10.6** `frontend/js/ws.js`（連線 + message_type 分派）。
+- [x] **10.7** `frontend/js/chat-app.js`（`sendMessage()` 呼叫 REST，不是WS）。
+- [x] **10.8** `frontend/js/charts.js`。
+- [x] **10.9** `frontend/js/map.js`。
+- [x] **10.10** `frontend/js/app.js`（KPI/F7分頁/F2彈窗/F5報告卡片，[待確認]項目見 `index.html` 內補註的業界通用版原型，可依團隊意見調整版面但資料形狀不能變）。
+- [x] **10.11** `frontend/index.html` 最終走查——所有 `<script>`/`<link>` 路徑正確、六分區+F6面板都對應到已完成的JS函式。
+- [x] **10.12** 手動下載 Chart.js 放進 `frontend/vendor/`（見該資料夾 README）。
 
 ### Phase 11：整合驗證（不寫新程式碼，是驗收關卡）
 
-- [ ] **11.1** `USE_STUB_MODULES=true` 跑 `uvicorn main:app --reload`，確認四端點回應通過契約驗證、前端六分區以假資料完整顯示。
-- [ ] **11.2** `USE_STUB_MODULES=false`（真實模組）跑三筆黃金事件（ACC_001/EVT_002/EVT_003），逐項比對 `.kiro/steering/04-system-architecture.md` §8 黃金驗收表。
-- [ ] **11.3** `USE_BEDROCK=false` 保底模式重跑三筆事件，確認完整流程不中斷。
-- [ ] **11.4** 全部 `tests/` 通過（`pytest tests/ -v`），確認沒有殘留的 `pytest.skip`。
+- [x] **11.1** `USE_STUB_MODULES=true` 跑 `uvicorn main:app --reload`，確認四端點回應通過契約驗證、前端六分區以假資料完整顯示。
+- [x] **11.2** `USE_STUB_MODULES=false`（真實模組）跑三筆黃金事件（ACC_001/EVT_002/EVT_003），逐項比對 `.kiro/steering/04-system-architecture.md` §8 黃金驗收表。
+- [x] **11.3** `USE_BEDROCK=false` 保底模式重跑三筆事件，確認完整流程不中斷。
+- [x] **11.4** 全部 `tests/` 通過（`pytest tests/ -v`），確認沒有殘留的 `pytest.skip`。
 
 ### Phase 12：加分項（核心全部完成、Demo 排練過一次之後才做）
 

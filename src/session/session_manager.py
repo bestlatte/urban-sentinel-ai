@@ -7,7 +7,9 @@ user_message 參數，沒有 _pending_message 暫存機制）。
 
 from __future__ import annotations
 
-from src.session.models import Session, W1Context
+from datetime import datetime
+
+from src.session.models import Session, Turn, W1Context
 
 MAX_HISTORY = 10
 
@@ -18,10 +20,20 @@ SESSION_STORE: dict[str, Session] = {}
 def handle_message(session_id: str, user_message: str) -> W1Context:
     """收到使用者新訊息時呼叫（由 orchestrator.handle_user_query() 呼叫，不是前端直接呼叫）。
 
-    TODO(Kiro): 依 design.md 第四節「handle_message 流程」實作：
     取得或建立 session → 組合最近 MAX_HISTORY 輪上下文 → 回傳 W1Context。
     """
-    raise NotImplementedError("見 W2-session-manager/design.md 第4.1節")
+    if session_id not in SESSION_STORE:
+        SESSION_STORE[session_id] = Session(session_id=session_id)
+
+    session = SESSION_STORE[session_id]
+    recent_history = session.history[-MAX_HISTORY:]
+
+    return W1Context(
+        session_id=session_id,
+        new_message=user_message,
+        history=recent_history,
+        accumulated_assumptions=session.assumptions.copy(),
+    )
 
 
 def record_response(
@@ -36,9 +48,26 @@ def record_response(
     user_message 由呼叫端直接傳入（呼叫端本來就同時握有這個值），不靠暫存屬性。
     session_id 不存在時靜默忽略，不報錯（session 已被清除的正常情況）。
     """
-    raise NotImplementedError("見 W2-session-manager/design.md 第4.2節")
+    session = SESSION_STORE.get(session_id)
+    if session is None:
+        return
+
+    turn = Turn(
+        user_message=user_message,
+        ai_response=ai_response,
+        timestamp=datetime.now(),
+        triggered_sops=triggered_sops or [],
+    )
+    session.history.append(turn)
+
+    if new_assumptions:
+        session.assumptions.update(new_assumptions)
+
+    # 超過上限就裁切
+    if len(session.history) > MAX_HISTORY:
+        session.history = session.history[-MAX_HISTORY:]
 
 
 def clear_session(session_id: str) -> None:
     """使用者點擊清除按鈕時呼叫（走 WebSocket chat.clear_session.v1，例外不走REST）。"""
-    raise NotImplementedError("見 W2-session-manager/design.md 第4.3節")
+    SESSION_STORE.pop(session_id, None)
