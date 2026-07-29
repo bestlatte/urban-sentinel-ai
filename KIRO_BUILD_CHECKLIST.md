@@ -217,7 +217,7 @@
   （真Bedrock路徑，Phase 13.4已完成）如果也只有中英，一併補上，兩條路徑要一致。
   完成後補 `tests/test_reporting.py` 對應測試（比照現有
   `test_c4_sop6_triggered_en_is_not_none` 的寫法，斷言 `ja`/`ko` 也非空）。
-- [ ] **13.7**（[2026-07-28新增] 對應 `2026-07-28_架構圖合規性複查與待辦.md` §2.3，
+- [x] **13.7**（[2026-07-28新增] 對應 `2026-07-28_架構圖合規性複查與待辦.md` §2.3，
   中風險，demo有加分價值——現在Phase13已經把A2 Agent真的接上，這個事件能讓評審看到
   「Agent正在一步步決定要呼叫哪個工具」，呼應「LLM決定要call哪個工具」的賣點，不是
   純粹補齊而已）`decision.task_update.v1`（Agent活動面板逐任務即時更新）。
@@ -239,7 +239,7 @@
      ws_broadcaster=ws_manager.broadcast)`。
   5. `frontend/js/ws.js` 已經有 `case "decision.task_update.v1"` 分支（呼叫
      `appendActivityEntry("task_update", payload)`），前端不用改。
-- [ ] **13.8**（[2026-07-28新增] 低優先度，`2026-07-28_架構圖合規性複查與待辦.md` §2.3，
+- [x] **13.8**（[2026-07-28新增] 低優先度，`2026-07-28_架構圖合規性複查與待辦.md` §2.3，
   單人demo用不太到，時間真的很夠再做）`rules.evaluated.v1`——在
   `main.py::_periodic_rule_monitor()`（Phase 12.1）跟 `handle_trigger_batch()` 呼叫
   `evaluate_rules` 之後，額外推播一次 `{"message_type": "rules.evaluated.v1", "payload":
@@ -247,7 +247,7 @@
   `frontend/js/ws.js` 已有 `case "rules.evaluated.v1"` 分支（呼叫 `onRulesEvaluated`），
   但 `onRulesEvaluated()` 目前是空函式（`app.js` 裡只有註解「可選：更新圖表或KPI」），
   補這項時記得順便把 `onRulesEvaluated()` 的內容也寫出來，不然推播了前端還是沒反應。
-- [ ] **13.9**（[2026-07-28新增] 低優先度，`2026-07-28_架構圖合規性複查與待辦.md` §2.3，
+- [x] **13.9**（[2026-07-28新增] 低優先度，`2026-07-28_架構圖合規性複查與待辦.md` §2.3，
   單人demo用不到，時間真的很夠再做）`chat.response.v1`／`chat.input_lock.v1`／
   `chat.system_status.v1`——這三個是「多分頁/多人同時看同一對話」情境的冗餘推播管道，
   `sendMessage()` 已經用同步REST處理完整流程，單人操作看不出差異。如果要做：

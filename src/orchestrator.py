@@ -450,10 +450,35 @@ def handle_trigger_batch(batch: list[dict]) -> DecisionResult:
     )
 
 
-def handle_incident(event: Incident) -> DecisionResult:
+async def _broadcast_task_update(
+    ws_broadcaster,
+    trace_id: str,
+    dispatch_seq: int,
+    status: str,
+) -> None:
+    """直接 await 推播 decision.task_update.v1，確保即時送出。"""
+    if ws_broadcaster is None:
+        return
+    try:
+        await ws_broadcaster({
+            "message_type": "decision.task_update.v1",
+            "payload": {
+                "trace_id": trace_id,
+                "dispatch_seq": dispatch_seq,
+                "status": status,
+            },
+        })
+    except Exception:
+        pass  # 推播失敗不影響主流程
+
+
+async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResult:
     """D4 監聽器呼叫入口，對應 REST POST /api/incidents/evaluate。
 
     七階段生命週期：OPEN→FLAGS→PLAN→EXECUTE→SUMMARY→EXPLAIN→PUSH。
+
+    ws_broadcaster: 可選 async function，用於推播 decision.task_update.v1
+    讓前端 Agent 活動面板即時顯示每一步的進度。
     """
     if not event.event_id or not event.affected_segment:
         raise ValueError("event_id / affected_segment 缺漏")
@@ -514,6 +539,7 @@ def handle_incident(event: Incident) -> DecisionResult:
     report_text: str | None = None
     notification: Notification | None = None
     degraded: list[str] = []
+    _dispatch_seq = 0
 
     # 嘗試 A2 LLM 規劃器（SPEC-O2 §3），失敗時安全網接手
     from src.agent.a2_orchestrator_agent import decide_and_execute
@@ -527,26 +553,33 @@ def handle_incident(event: Incident) -> DecisionResult:
         # A2 Agent 成功——tool 內部已經真的呼叫過 GATEWAY 方法，
         # 結果以 dict 存在 a2_result 裡。重建 Pydantic 物件：
         if a2_result.get("route_plan") and requires_rerouting:
+            _dispatch_seq += 1
+            await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "routing_started")
             try:
-                # tool 回傳的是 dict，但 GATEWAY.plan_routes 回傳的是 RoutePlan。
-                # 由於 tool 內部已經真正執行過計算，直接再呼叫一次取得正確型別
-                # （冪等性保證同樣輸入同樣結果，不會浪費額外計算）。
                 route_plan = GATEWAY.plan_routes(
                     RouteRequest(incident=event, bundle=bundle, as_of=event.timestamp)
                 )
             except Exception as e:
                 logger.warning(f"A2 指示 plan_routes 但執行失敗: {e}")
+            _dispatch_seq += 1
+            await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "routing_done")
 
         if a2_result.get("ete"):
+            _dispatch_seq += 1
+            await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_started")
             try:
                 ete = GATEWAY.calculate_ete(event, bundle)
             except Exception as e:
                 logger.warning(f"A2 指示 calculate_ete 但執行失敗: {e}")
+            _dispatch_seq += 1
+            await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_done")
 
         logger.info(f"A2 Agent 規劃完成（planned_by={a2_result.get('planned_by')}）")
 
     # 安全網：Agent 漏呼叫必要工具、或 Agent 不可用時，確定性模組補位
     if requires_rerouting and route_plan is None:
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "routing_started")
         try:
             route_plan = GATEWAY.plan_routes(
                 RouteRequest(incident=event, bundle=bundle, as_of=event.timestamp)
@@ -554,14 +587,20 @@ def handle_incident(event: Incident) -> DecisionResult:
         except Exception as e:
             logger.warning(f"plan_routes 失敗: {e}")
             degraded.append("ROUTING_FAILED")
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "routing_done")
 
     # ETE（所有事件必須有）
     if ete is None:
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_started")
         try:
             ete = GATEWAY.calculate_ete(event, bundle)
         except Exception as e:
             logger.warning(f"calculate_ete 失敗: {e}")
             degraded.append("ETE_FAILED")
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_done")
 
     # Agent 建議
     advisory: BedrockAdvisory | None = None
@@ -572,6 +611,8 @@ def handle_incident(event: Incident) -> DecisionResult:
 
     # 報告生成
     if ete is not None:
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "report_started")
         try:
             report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory, bundle)
         except Exception as e:
@@ -580,6 +621,8 @@ def handle_incident(event: Incident) -> DecisionResult:
             degraded.append("C1_FAILED")
         if notification is None and _STATE.multilingual:
             degraded.append("C4_FAILED")
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "report_done")
 
     # --- 5. SUMMARY ---
     elapsed = int((time.perf_counter() - start) * 1000)
@@ -674,7 +717,7 @@ def handle_user_query(
 
     if any(word in question for word in _FORWARD_LOOKING_WORDS):
         _current_trace_ctx.set(current_trace_id)
-        result = process_whatif_request(session_id=session_id, content=question, ws_broadcaster=ws_broadcaster)
+        result = process_whatif_request(session_id=session_id, content=question, correlation_id=correlation_id, ws_broadcaster=ws_broadcaster)
         return {"message_type": "whatif.evaluated.v1", "payload": result}
 
     if current_trace_id is not None:

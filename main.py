@@ -40,6 +40,13 @@ async def _startup_rule_scan():
     try:
         bundle = orchestrator.GATEWAY.load_data()
         sensing = orchestrator.GATEWAY.evaluate_rules(bundle, incident=None)
+
+        # 推播 rules.evaluated.v1（每次規則評估後都推，讓 F1 即時更新）
+        await ws_manager.broadcast({
+            "message_type": "rules.evaluated.v1",
+            "payload": sensing.model_dump(mode="json"),
+        })
+
         # 找出命中的 SOP 條款，組成 batch
         triggered = []
         seen_sections = set()
@@ -90,6 +97,13 @@ async def _periodic_rule_monitor() -> None:
         try:
             bundle = orchestrator.GATEWAY.load_data()
             sensing = orchestrator.GATEWAY.evaluate_rules(bundle, incident=None)
+
+            # 推播 rules.evaluated.v1（每次規則評估後都推，讓 F1 即時更新）
+            await ws_manager.broadcast({
+                "message_type": "rules.evaluated.v1",
+                "payload": sensing.model_dump(mode="json"),
+            })
+
             current_level = sensing.traffic_level if sensing.traffic_level != "normal" else None
 
             if current_level == _last_traffic_level:
@@ -134,6 +148,8 @@ async def _periodic_rule_monitor() -> None:
 
 # frontend/ 以 StaticFiles(html=True) 掛在 /，API 前綴 /api 與 /ws 不會被靜態路由吃掉。
 app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
+# data/ 掛載供前端 fetch display_geometry.json（僅 SVG 顯示用，不參與演算）
+app.mount("/data", StaticFiles(directory="data"), name="data")
 
 
 @app.exception_handler(Exception)
@@ -245,6 +261,11 @@ async def get_dashboard():
         "status": "ok",
         "message_type": "dashboard.updated.v1",
         "payload": payload.model_dump(mode="json"),
+        "traffic_samples": [
+            {"timestamp": t.timestamp.isoformat(), "saturation_score": t.saturation_score, "segment_id": t.segment_id}
+            for t in bundle.traffic
+            if t.saturation_score is not None
+        ],
     })
 
 
@@ -276,7 +297,7 @@ async def evaluate_incident(body: dict):
         "payload": {"triggered_by": [event_id]},
     })
 
-    decision_result = orchestrator.handle_incident(incident)
+    decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
     payload_json = decision_result.model_dump(mode="json")
 
     # 廣播 decision.alert.v1（若等級為 A 或 B）

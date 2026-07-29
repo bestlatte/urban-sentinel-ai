@@ -1,28 +1,26 @@
 /**
- * F4 SVG 拓樸圖：依 display_geometry.json 定位，依 DecisionResult.routes 上色。
+ * F4 SVG 拓樸圖：依 display_geometry.json 定位 + road_network_topology 連線。
  * 色彩規則（02-data-contract.md §8）：
- *   主路線亮綠實線、次路線黃色虛線、封閉路段紅色粗線、正常青綠。
- * 不用 Leaflet/Mapbox（00-tech-stack.md 禁用），用原生 SVG。
+ *   主路線亮綠、次路線黃色虛線、封閉路段紅色、正常中性灰。
  */
 
 let mapGeometry = null;
+let mapTopology = null;
 
 async function initMap() {
   const container = document.getElementById("f4-map");
   if (!container) return;
 
   try {
-    const resp = await fetch("/frontend/data/display_geometry.json");
-    if (!resp.ok) {
-      // 嘗試從根路徑
-      const resp2 = await fetch("/data/display_geometry.json");
-      if (resp2.ok) mapGeometry = await resp2.json();
-    } else {
-      mapGeometry = await resp.json();
-    }
+    const [geoResp, topoResp] = await Promise.all([
+      fetch("/data/display_geometry.json"),
+      fetch("/data/road_network_topology.json"),
+    ]);
+    if (geoResp.ok) mapGeometry = await geoResp.json();
+    if (topoResp.ok) mapTopology = await topoResp.json();
   } catch (e) {
-    // 靜態載入失敗，用內嵌 fallback
     mapGeometry = null;
+    mapTopology = null;
   }
 
   renderMap(container);
@@ -30,41 +28,104 @@ async function initMap() {
 
 function renderMap(container, routes) {
   if (!mapGeometry) {
-    container.innerHTML = `<div style="color:#64748b;text-align:center;padding:40px">路網拓樸圖載入中...</div>`;
+    container.innerHTML = `<div style="color:hsl(0,0%,40%);text-align:center;padding:60px 0;font-size:0.8rem">Road network loading...</div>`;
     return;
   }
 
-  const vb = mapGeometry.viewBox || "0 0 800 600";
+  const vb = "0 0 600 500";
   const points = mapGeometry.display_points || [];
+  const posMap = {};
+  // 重新映射座標到更緊湊的範圍，讓節點佔滿畫布
+  const rawPoints = mapGeometry.display_points || [];
+  const xs = rawPoints.map(p => p.x);
+  const ys = rawPoints.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const padX = 60, padY = 50;
+  const scaleX = (600 - padX * 2) / (maxX - minX || 1);
+  const scaleY = (500 - padY * 2) / (maxY - minY || 1);
 
-  let svg = `<svg viewBox="${vb}" style="width:100%;height:100%;" xmlns="http://www.w3.org/2000/svg">`;
+  const mappedPoints = rawPoints.map(p => ({
+    ...p,
+    mx: padX + (p.x - minX) * scaleX,
+    my: padY + (p.y - minY) * scaleY,
+  }));
+  mappedPoints.forEach((p) => { posMap[p.segment_id] = p; });
 
-  // 背景
-  svg += `<rect width="800" height="600" fill="#0f172a" rx="8"/>`;
+  let svg = `<svg viewBox="${vb}" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg">`;
 
-  // 繪製路段節點
-  points.forEach((p) => {
+  // 繪製連線（alternatives 關係）
+  if (mapTopology) {
+    const drawnEdges = new Set();
+    mapTopology.forEach((seg) => {
+      const from = posMap[seg.segment_id];
+      if (!from) return;
+      (seg.alternatives || []).forEach((altId) => {
+        const to = posMap[altId];
+        if (!to) return;
+        const edgeKey = [seg.segment_id, altId].sort().join("-");
+        if (drawnEdges.has(edgeKey)) return;
+        drawnEdges.add(edgeKey);
+        const edgeColor = getEdgeColor(seg.segment_id, altId, routes);
+        const edgeDash = getEdgeDash(seg.segment_id, altId, routes);
+        const edgeWidth = getEdgeWidth(seg.segment_id, altId, routes);
+        svg += `<line x1="${from.mx}" y1="${from.my}" x2="${to.mx}" y2="${to.my}" stroke="${edgeColor}" stroke-width="${edgeWidth}" stroke-dasharray="${edgeDash}" opacity="0.5"/>`;
+      });
+    });
+  }
+
+  // 繪製節點
+  mappedPoints.forEach((p) => {
     const color = getSegmentColor(p.segment_id, routes);
-    const strokeWidth = getSegmentStroke(p.segment_id, routes);
-    const dashArray = getSegmentDash(p.segment_id, routes);
-
-    svg += `<circle cx="${p.x}" cy="${p.y}" r="8" fill="${color}" stroke="${color}" stroke-width="${strokeWidth}" stroke-dasharray="${dashArray}" opacity="0.9"/>`;
+    const r = getNodeRadius(p.segment_id, routes);
+    svg += `<circle cx="${p.mx}" cy="${p.my}" r="${r}" fill="${color}" opacity="0.9"/>`;
     // 標籤
-    const label = (p.$note || p.segment_id).replace(/，.*/, "");
-    svg += `<text x="${p.x}" y="${p.y + 20}" text-anchor="middle" fill="#94a3b8" font-size="9">${escapeHtml(label)}</text>`;
+    const label = (p.$note || p.segment_id).replace(/，.*/, "").replace(/（.*）/, "");
+    svg += `<text x="${p.mx}" y="${p.my + r + 14}" text-anchor="middle" fill="hsl(0,0%,50%)" font-size="11" font-family="-apple-system,sans-serif">${escapeHtml(label)}</text>`;
   });
 
   svg += `</svg>`;
-  container.innerHTML = svg;
+
+  // 圖例
+  const legend = `<div style="position:absolute;bottom:12px;right:16px;display:flex;gap:12px;font-size:0.65rem;color:hsl(0,0%,50%)">
+    <span><span style="color:hsl(142,71%,45%)">●</span> 主線</span>
+    <span><span style="color:hsl(48,96%,53%)">●</span> 次線</span>
+    <span><span style="color:hsl(0,84%,60%)">●</span> 封閉</span>
+    <span><span style="color:hsl(0,0%,30%)">●</span> 一般</span>
+  </div>`;
+
+  container.innerHTML = svg + legend;
 }
 
-/**
- * [2026-07-28架構複查新增] R4 的 saturated_but_retained 例外（唯一合格候選仍飽和時
- * 保留為主/次線）之前完全沒有視覺標示，選中的路線在地圖上跟正常暢通路線同一種顏色，
- * 會誤導指揮官——跟 reporting.py 的建議書文字警語是同一個安全疑慮，一起修。
- * 用橘色（呼應 02-data-contract.md §8「B級橘」的警示色調），優先權高於主/次路線的
- * 一般配色，避免跟次路線既有的黃色混淆。
- */
+function getEdgeColor(fromId, toId, routes) {
+  if (!routes) return "hsl(0,0%,18%)";
+  const primary = routes.primary && routes.primary.segment_id;
+  const secondary = routes.secondary && routes.secondary.segment_id;
+  const closedIds = (routes.excluded || []).filter(e => e.reason_code === "CLOSED").map(e => e.segment_id);
+
+  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "hsl(0,84%,60%)";
+  if ((fromId === primary && toId === secondary) || (toId === primary && fromId === secondary)) return "hsl(142,71%,45%)";
+  if (fromId === primary || toId === primary) return "hsl(142,71%,45%)";
+  if (fromId === secondary || toId === secondary) return "hsl(48,96%,53%)";
+  return "hsl(0,0%,18%)";
+}
+
+function getEdgeDash(fromId, toId, routes) {
+  if (!routes) return "none";
+  const secondary = routes.secondary && routes.secondary.segment_id;
+  if (fromId === secondary || toId === secondary) return "4,3";
+  return "none";
+}
+
+function getEdgeWidth(fromId, toId, routes) {
+  if (!routes) return "1";
+  const primary = routes.primary && routes.primary.segment_id;
+  const closedIds = (routes.excluded || []).filter(e => e.reason_code === "CLOSED").map(e => e.segment_id);
+  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "2.5";
+  if (fromId === primary || toId === primary) return "2";
+  return "1";
+}
+
 function _isSaturatedRetained(segId, routes) {
   const findings = (routes && routes.findings) || [];
   return findings.some(
@@ -73,30 +134,23 @@ function _isSaturatedRetained(segId, routes) {
 }
 
 function getSegmentColor(segId, routes) {
-  if (!routes) return "#06b6d4"; // 正常青綠
-  if (_isSaturatedRetained(segId, routes)) return "#f97316"; // 飽和但保留：橘色警示
-  if (routes.primary && routes.primary.segment_id === segId) return "#22c55e"; // 主路線亮綠
-  if (routes.secondary && routes.secondary.segment_id === segId) return "#eab308"; // 次路線黃
+  if (!routes) return "hsl(0,0%,30%)";
+  if (_isSaturatedRetained(segId, routes)) return "hsl(25,95%,53%)";
+  if (routes.primary && routes.primary.segment_id === segId) return "hsl(142,71%,45%)";
+  if (routes.secondary && routes.secondary.segment_id === segId) return "hsl(48,96%,53%)";
   const excluded = routes.excluded || [];
-  if (excluded.some((e) => e.segment_id === segId && e.reason_code === "CLOSED")) return "#dc2626"; // 封閉紅
-  if (excluded.some((e) => e.segment_id === segId)) return "#64748b"; // 排除灰
-  return "#06b6d4";
+  if (excluded.some((e) => e.segment_id === segId && e.reason_code === "CLOSED")) return "hsl(0,84%,60%)";
+  if (excluded.some((e) => e.segment_id === segId)) return "hsl(0,0%,22%)";
+  return "hsl(0,0%,30%)";
 }
 
-function getSegmentStroke(segId, routes) {
-  if (!routes) return "2";
-  if (_isSaturatedRetained(segId, routes)) return "4"; // 加粗，比照封閉路段的警示強度
-  if (routes.primary && routes.primary.segment_id === segId) return "3";
+function getNodeRadius(segId, routes) {
+  if (!routes) return 6;
+  if (routes.primary && routes.primary.segment_id === segId) return 9;
+  if (routes.secondary && routes.secondary.segment_id === segId) return 8;
   const excluded = routes.excluded || [];
-  if (excluded.some((e) => e.segment_id === segId && e.reason_code === "CLOSED")) return "3";
-  return "2";
-}
-
-function getSegmentDash(segId, routes) {
-  if (!routes) return "none";
-  if (_isSaturatedRetained(segId, routes)) return "6,2,1,2"; // 點劃線，跟次路線的純虛線區隔
-  if (routes.secondary && routes.secondary.segment_id === segId) return "4,3"; // 虛線
-  return "none";
+  if (excluded.some((e) => e.segment_id === segId && e.reason_code === "CLOSED")) return 9;
+  return 6;
 }
 
 function updateMap(routes) {

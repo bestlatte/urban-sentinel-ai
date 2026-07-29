@@ -1,25 +1,23 @@
-/* CSS 變數集中管理。參考 spec：F6-chat-ui/design.md 第七節 +
-   .kiro/steering/02-data-contract.md §8 前端顯示色彩規則（A級紅/B級橘/正常青綠，
-   主路線亮綠實線/次路線黃色虛線/封閉路段紅色粗線）。
-   B級一律用橘色，不要用黃色——黃色在F4路網圖已經是「次路線」的顏色語意。 */
+/* 全域 CSS 變數 — 統一 shadcn neutral dark 色調 */
 
 :root {
-  /* F6 對話面板（淺色風，跟左側深色Dashboard對比） */
-  --chat-primary: #2563eb;
-  --chat-danger: #dc2626;
-  --chat-warning: #f59e0b;
-  --chat-success: #16a34a;
-  --chat-radius: 12px;
-  --chat-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  --chat-panel-width: 420px;
-  --chat-panel-min: 350px;
-  --chat-panel-max: 550px;
+  /* 共用色彩（跟 styles.css :root 一致，這裡提供語意別名） */
+  --chat-primary: hsl(0, 0%, 95%);
+  --chat-primary-bg: hsl(0, 0%, 14%);
+  --chat-danger: hsl(0, 84%, 60%);
+  --chat-warning: hsl(25, 95%, 53%);
+  --chat-success: hsl(142, 71%, 45%);
+  --chat-radius: 8px;
+  --chat-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --chat-panel-width: 400px;
+  --chat-panel-min: 340px;
+  --chat-panel-max: 520px;
 
-  /* Dashboard 主體：深色指揮中心主題 + 級別/路線色彩（02-data-contract.md §8） */
-  --level-a: #dc2626; /* A級紅 */
-  --level-b: #f97316; /* B級橘（不是黃色） */
-  --level-normal: #06b6d4; /* 正常青綠 */
-  --route-primary: #22c55e; /* 主路線亮綠實線 */
-  --route-secondary: #eab308; /* 次路線黃色虛線 */
-  --route-closed: #dc2626; /* 封閉路段紅色粗線 */
+  /* 級別/路線色彩（02-data-contract.md §8） */
+  --level-a: hsl(0, 84%, 60%);
+  --level-b: hsl(25, 95%, 53%);
+  --level-normal: hsl(186, 78%, 42%);
+  --route-primary: hsl(142, 71%, 45%);
+  --route-secondary: hsl(48, 96%, 53%);
+  --route-closed: hsl(0, 84%, 60%);
 }

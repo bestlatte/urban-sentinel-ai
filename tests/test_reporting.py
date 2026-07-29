@@ -221,6 +221,19 @@ def test_c4_sop6_triggered_en_is_not_none(bundle: NormalizedDataBundle):
     assert notification.en is not None
 
 
+def test_c4_sop6_triggered_ja_ko_is_not_none(bundle: NormalizedDataBundle):
+    """SOP-6 觸發時 Notification.ja / .ko 應非空（13.6 多語加分項）。"""
+    from src.reporting import generate_report
+    import os
+    os.environ["USE_BEDROCK"] = "false"
+    incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
+    assert sensing.multilingual_required is True
+    _, notification = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
+    assert notification is not None
+    assert notification.ja is not None
+    assert notification.ko is not None
+
+
 def test_report_contains_ete_value(bundle: NormalizedDataBundle):
     """建議書全文應包含 ETE 數值。"""
     from src.reporting import generate_report

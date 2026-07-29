@@ -127,7 +127,7 @@ def _extract_new_assumptions(response: W1Response) -> dict[str, float | int | st
     return None
 
 
-def process_whatif_request(session_id: str, content: str, ws_broadcaster=None) -> W1Response:
+def process_whatif_request(session_id: str, content: str, correlation_id: str | None = None, ws_broadcaster=None) -> W1Response:
     """由 orchestrator.handle_user_query() 呼叫的對外入口。
 
     流程：W2.handle_message() 組上下文 → （可選）推播 loading 進度
@@ -136,17 +136,20 @@ def process_whatif_request(session_id: str, content: str, ws_broadcaster=None) -
     from src.session.session_manager import handle_message, record_response
     from src.agent.loading import broadcast_loading_start_sync, broadcast_loading_complete_sync
 
+    # correlation_id 為 None 時 fallback 用 session_id，避免舊呼叫端沒傳時炸掉
+    effective_correlation_id = correlation_id or session_id
+
     # 1. W2 組上下文
     context = handle_message(session_id, content)
 
     # 2. 推播 loading 開始（額外通知，不影響主流程）
-    broadcast_loading_start_sync(ws_broadcaster, correlation_id=session_id)
+    broadcast_loading_start_sync(ws_broadcaster, correlation_id=effective_correlation_id)
 
     # 3. W1 處理
     response = process_whatif(context)
 
     # 4. 推播 loading 完成
-    broadcast_loading_complete_sync(ws_broadcaster, correlation_id=session_id)
+    broadcast_loading_complete_sync(ws_broadcaster, correlation_id=effective_correlation_id)
 
     # 5. W2 記錄回覆
     record_response(
@@ -156,5 +159,28 @@ def process_whatif_request(session_id: str, content: str, ws_broadcaster=None) -
         triggered_sops=[s.get("section_number", 0) for s in response.triggered_sops] if response.triggered_sops else None,
         new_assumptions=_extract_new_assumptions(response),
     )
+
+    # 6. 冗餘推播 chat.response.v1（多分頁/多人同時看同一對話的保底管道）
+    if ws_broadcaster is not None:
+        import asyncio
+        from dataclasses import asdict
+
+        async def _push_chat_response():
+            await ws_broadcaster({
+                "message_type": "chat.response.v1",
+                "payload": {
+                    "correlation_id": effective_correlation_id,
+                    **asdict(response),
+                },
+            })
+
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_push_chat_response())
+            else:
+                loop.run_until_complete(_push_chat_response())
+        except Exception:
+            pass  # 推播失敗不影響主流程
 
     return response

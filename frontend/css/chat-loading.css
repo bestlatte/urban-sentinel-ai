@@ -1,4 +1,4 @@
-/* Loading 動畫、步驟進度。 */
+/* Loading 動畫 — dark theme */
 
 .loading-container {
   padding: 12px 16px;
@@ -11,9 +11,9 @@
 }
 
 .loading-dots span {
-  width: 6px;
-  height: 6px;
-  background: var(--chat-primary);
+  width: 5px;
+  height: 5px;
+  background: hsl(0, 0%, 50%);
   border-radius: 50%;
   animation: dot-bounce 1.4s infinite ease-in-out both;
 }
@@ -29,29 +29,29 @@
 
 .loading-steps {
   margin-top: 8px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
 }
 
 .loading-step {
-  padding: 4px 0;
-  color: #94a3b8;
+  padding: 3px 0;
+  color: hsl(0, 0%, 40%);
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .loading-step.done {
-  color: var(--chat-success);
+  color: hsl(142, 71%, 50%);
 }
 
 .loading-step.active {
-  color: var(--chat-primary);
+  color: hsl(0, 0%, 80%);
   font-weight: 500;
 }
 
 .loading-step::before {
   content: "○";
-  font-size: 0.625rem;
+  font-size: 0.6rem;
 }
 
 .loading-step.done::before {

@@ -1,8 +1,8 @@
-/* 輸入框、送出按鈕、快捷問題。 */
+/* 輸入框 — dark theme */
 
 .chat-input-area {
   padding: 12px 16px;
-  border-top: 1px solid #e2e8f0;
+  border-top: 1px solid hsl(0, 0%, 12%);
   display: flex;
   gap: 8px;
   align-items: center;
@@ -10,37 +10,46 @@
 
 .chat-input-area input {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  font-size: 0.875rem;
+  padding: 9px 12px;
+  border: 1px solid hsl(0, 0%, 16%);
+  border-radius: 6px;
+  font-size: 0.825rem;
   outline: none;
-  transition: border-color 0.2s;
+  background: hsl(0, 0%, 6%);
+  color: hsl(0, 0%, 90%);
+  transition: border-color 0.15s;
 }
 
 .chat-input-area input:focus {
-  border-color: var(--chat-primary);
+  border-color: hsl(0, 0%, 30%);
 }
 
 .chat-input-area input:disabled {
-  background: #f1f5f9;
-  color: #94a3b8;
+  background: hsl(0, 0%, 8%);
+  color: hsl(0, 0%, 40%);
   cursor: not-allowed;
 }
 
 .chat-input-area button {
-  padding: 10px 16px;
-  background: var(--chat-primary);
-  color: #fff;
+  padding: 9px 14px;
+  background: hsl(0, 0%, 95%);
+  color: hsl(0, 0%, 5%);
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
+  font-weight: 600;
   white-space: nowrap;
+  transition: background 0.15s;
+}
+
+.chat-input-area button:hover {
+  background: hsl(0, 0%, 85%);
 }
 
 .chat-input-area button:disabled {
-  background: #94a3b8;
+  background: hsl(0, 0%, 20%);
+  color: hsl(0, 0%, 40%);
   cursor: not-allowed;
 }
 
@@ -52,16 +61,17 @@
 }
 
 .quick-q {
-  padding: 6px 12px;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  font-size: 0.75rem;
-  color: #475569;
+  padding: 5px 10px;
+  background: hsl(0, 0%, 10%);
+  border: 1px solid hsl(0, 0%, 15%);
+  border-radius: 14px;
+  font-size: 0.7rem;
+  color: hsl(0, 0%, 55%);
   cursor: pointer;
-  transition: background 0.2s;
+  transition: color 0.15s, border-color 0.15s;
 }
 
 .quick-q:hover {
-  background: #e2e8f0;
+  color: hsl(0, 0%, 90%);
+  border-color: hsl(0, 0%, 25%);
 }

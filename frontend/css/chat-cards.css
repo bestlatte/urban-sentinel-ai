@@ -1,73 +1,74 @@
-/* Decision Card、SOP Badge、ETE Badge、Route Tag。 */
+/* Decision Card / SOP Badge / ETE Badge / Route Tag — dark theme */
 
 .decision-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: hsl(0, 0%, 7%);
+  border: 1px solid hsl(0, 0%, 14%);
   border-radius: 8px;
   padding: 14px;
   margin-top: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .decision-card .card-title {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   margin-bottom: 8px;
-  color: #1e293b;
+  color: hsl(0, 0%, 90%);
 }
 
 .sop-badge {
   display: inline-block;
   padding: 2px 8px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 500;
   margin-right: 4px;
   margin-bottom: 4px;
+  background: hsl(0, 0%, 12%);
+  color: hsl(0, 0%, 70%);
+  border: 1px solid hsl(0, 0%, 16%);
 }
 
-.sop-badge.sop-1 { background: #fef3c7; color: #92400e; }
-.sop-badge.sop-2 { background: #fee2e2; color: #991b1b; }
-.sop-badge.sop-3 { background: #dbeafe; color: #1e40af; }
-.sop-badge.sop-4 { background: #e0e7ff; color: #3730a3; }
-.sop-badge.sop-5 { background: #fce7f3; color: #9d174d; }
-.sop-badge.sop-6 { background: #d1fae5; color: #065f46; }
-.sop-badge.sop-7 { background: #f3e8ff; color: #6b21a8; }
+.sop-badge.sop-1 { border-color: hsl(48, 60%, 30%); color: hsl(48, 80%, 65%); }
+.sop-badge.sop-2 { border-color: hsl(0, 50%, 30%); color: hsl(0, 80%, 70%); }
+.sop-badge.sop-3 { border-color: hsl(213, 50%, 30%); color: hsl(213, 80%, 70%); }
+.sop-badge.sop-4 { border-color: hsl(245, 50%, 30%); color: hsl(245, 70%, 70%); }
+.sop-badge.sop-5 { border-color: hsl(330, 50%, 30%); color: hsl(330, 70%, 70%); }
+.sop-badge.sop-6 { border-color: hsl(160, 50%, 25%); color: hsl(160, 70%, 60%); }
+.sop-badge.sop-7 { border-color: hsl(270, 50%, 30%); color: hsl(270, 70%, 70%); }
 
 .ete-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
-  background: #fef9c3;
-  color: #854d0e;
+  padding: 3px 9px;
+  background: hsl(0, 0%, 10%);
+  color: hsl(48, 80%, 65%);
+  border: 1px solid hsl(48, 40%, 25%);
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
 }
 
 .route-tag {
   display: inline-block;
-  padding: 3px 8px;
+  padding: 2px 8px;
   border-radius: 4px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   margin-right: 4px;
+  background: hsl(0, 0%, 10%);
 }
 
 .route-tag.primary {
-  background: #dcfce7;
-  color: #166534;
-  border: 1px solid var(--route-primary);
+  color: hsl(142, 71%, 55%);
+  border: 1px solid hsl(142, 50%, 25%);
 }
 
 .route-tag.secondary {
-  background: #fefce8;
-  color: #713f12;
-  border: 1px solid var(--route-secondary);
+  color: hsl(48, 96%, 60%);
+  border: 1px solid hsl(48, 50%, 25%);
 }
 
 .route-tag.blocked {
-  background: #fee2e2;
-  color: #991b1b;
-  border: 1px solid var(--route-closed);
+  color: hsl(0, 84%, 65%);
+  border: 1px solid hsl(0, 50%, 25%);
 }
