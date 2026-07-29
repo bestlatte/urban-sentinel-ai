@@ -163,7 +163,7 @@ def test_generate_report_returns_tuple(bundle: NormalizedDataBundle):
     import os
     os.environ["USE_BEDROCK"] = "false"
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
-    result = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    result = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert isinstance(result, tuple)
     assert len(result) == 2
 
@@ -175,7 +175,7 @@ def test_generate_report_notification_is_single_object_not_list(bundle: Normaliz
     import os
     os.environ["USE_BEDROCK"] = "false"
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
-    _, notification = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    _, notification = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert notification is None or isinstance(notification, NotifModel)
 
 
@@ -201,7 +201,7 @@ def test_c4_sop6_not_triggered_en_is_none(bundle: NormalizedDataBundle):
     ete = calculate_ete(incident, bundle)
     # 如果 SOP-6 沒觸發，en 應該是 None
     if not sensing.multilingual_required:
-        _, notification = generate_report(incident, sensing, None, ete, advisory=None)
+        _, notification = generate_report(incident, sensing, None, ete, advisory=None, bundle=bundle)
         assert notification is not None
         assert notification.en is None
         assert notification.zh is not None
@@ -215,7 +215,7 @@ def test_c4_sop6_triggered_en_is_not_none(bundle: NormalizedDataBundle):
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
     # ACC_001 at 22:10 — BS_TPE_101 roaming=0.40 >= 0.30 → SOP-6 觸發
     assert sensing.multilingual_required is True
-    _, notification = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    _, notification = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert notification is not None
     assert notification.zh is not None
     assert notification.en is not None
@@ -227,7 +227,7 @@ def test_report_contains_ete_value(bundle: NormalizedDataBundle):
     import os
     os.environ["USE_BEDROCK"] = "false"
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
-    report_text, _ = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    report_text, _ = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert report_text is not None
     assert "90" in report_text
 
@@ -238,7 +238,7 @@ def test_report_contains_route_names(bundle: NormalizedDataBundle):
     import os
     os.environ["USE_BEDROCK"] = "false"
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
-    report_text, _ = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    report_text, _ = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert report_text is not None
     assert "市民大道四段" in report_text  # primary route name
 
@@ -249,8 +249,8 @@ def test_llm_does_not_alter_fact_fields(bundle: NormalizedDataBundle):
     import os
     os.environ["USE_BEDROCK"] = "false"
     incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
-    r1, n1 = generate_report(incident, sensing, route_plan, ete, advisory=None)
-    r2, n2 = generate_report(incident, sensing, route_plan, ete, advisory=None)
+    r1, n1 = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
+    r2, n2 = generate_report(incident, sensing, route_plan, ete, advisory=None, bundle=bundle)
     assert r1 == r2  # 保底模板是確定性的
     if n1 and n2:
         assert n1.zh == n2.zh

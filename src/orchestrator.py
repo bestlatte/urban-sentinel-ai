@@ -56,6 +56,10 @@ class ModuleGateway(Protocol):
 
     def calculate_ete(self, incident: Incident, bundle: NormalizedDataBundle) -> EteEstimate: ...
 
+    # [2026-07-28架構複查新增] `bundle` 參數：回應SPEC-O2「§5必含COUNT_INTERSECTIONS」——
+    # SOP-5（號誌故障）需要用路網拓樸算受影響路口數（`routing.count_affected_intersections()`），
+    # 警力人數=路口數×2，這個計算需要 bundle 才能做，之前完全沒傳進來，是 §5 這條 SOP 的
+    # 人力派遣建議一直缺少具體人數的原因。
     def generate_report(
         self,
         incident: Incident,
@@ -63,6 +67,7 @@ class ModuleGateway(Protocol):
         route_plan: RoutePlan | None,
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
+        bundle: NormalizedDataBundle,
     ) -> tuple[str, Notification | None]: ...
 
     def run_agent(
@@ -185,6 +190,7 @@ class StubGateway:
         route_plan: RoutePlan | None,
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
+        bundle: NormalizedDataBundle,
     ) -> tuple[str, Notification | None]:
         report = (
             f"【交控建議書】事件 {incident.event_id}\n"
@@ -237,9 +243,10 @@ class LiveGateway:
         route_plan: RoutePlan | None,
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
+        bundle: NormalizedDataBundle,
     ) -> tuple[str, Notification | None]:
         from src.reporting import generate_report
-        return generate_report(incident, sensing, route_plan, ete, advisory)
+        return generate_report(incident, sensing, route_plan, ete, advisory, bundle)
 
     def run_agent(
         self,
@@ -418,10 +425,15 @@ def handle_trigger_batch(batch: list[dict]) -> DecisionResult:
     elapsed = int((time.perf_counter() - start) * 1000)
 
     # 判斷 is_simulated
+    # [2026-07-28架構複查修正：回應SPEC-O3對照表第8項] 原本只檢查 bundle.traffic，
+    # 但 SPEC-O3 明訂「只要有任一 provenance=demo 的欄位被使用才為 true」，bundle.crowd
+    # 也有獨立的 provenance 欄位（CrowdSample.provenance），必須一併檢查，否則人流資料
+    # 若曾經退化成 demo/derived，這裡會誤判為 false。
     from src.models import DataProvenance
-    is_simulated = any(
-        t.provenance != DataProvenance.PROVIDED for t in bundle.traffic
-    ) if bundle.traffic else False
+    is_simulated = (
+        any(t.provenance != DataProvenance.PROVIDED for t in bundle.traffic)
+        or any(c.provenance != DataProvenance.PROVIDED for c in bundle.crowd)
+    )
 
     return DecisionResult(
         trace_id=trace_id,
@@ -503,8 +515,38 @@ def handle_incident(event: Incident) -> DecisionResult:
     notification: Notification | None = None
     degraded: list[str] = []
 
-    # 路網規劃（僅 requires_rerouting=True）
-    if requires_rerouting:
+    # 嘗試 A2 LLM 規劃器（SPEC-O2 §3），失敗時安全網接手
+    from src.agent.a2_orchestrator_agent import decide_and_execute
+    a2_result = decide_and_execute(
+        event_id=event.event_id,
+        event_type=event.type,
+        classification=classification,
+    )
+
+    if a2_result is not None:
+        # A2 Agent 成功——tool 內部已經真的呼叫過 GATEWAY 方法，
+        # 結果以 dict 存在 a2_result 裡。重建 Pydantic 物件：
+        if a2_result.get("route_plan") and requires_rerouting:
+            try:
+                # tool 回傳的是 dict，但 GATEWAY.plan_routes 回傳的是 RoutePlan。
+                # 由於 tool 內部已經真正執行過計算，直接再呼叫一次取得正確型別
+                # （冪等性保證同樣輸入同樣結果，不會浪費額外計算）。
+                route_plan = GATEWAY.plan_routes(
+                    RouteRequest(incident=event, bundle=bundle, as_of=event.timestamp)
+                )
+            except Exception as e:
+                logger.warning(f"A2 指示 plan_routes 但執行失敗: {e}")
+
+        if a2_result.get("ete"):
+            try:
+                ete = GATEWAY.calculate_ete(event, bundle)
+            except Exception as e:
+                logger.warning(f"A2 指示 calculate_ete 但執行失敗: {e}")
+
+        logger.info(f"A2 Agent 規劃完成（planned_by={a2_result.get('planned_by')}）")
+
+    # 安全網：Agent 漏呼叫必要工具、或 Agent 不可用時，確定性模組補位
+    if requires_rerouting and route_plan is None:
         try:
             route_plan = GATEWAY.plan_routes(
                 RouteRequest(incident=event, bundle=bundle, as_of=event.timestamp)
@@ -513,12 +555,13 @@ def handle_incident(event: Incident) -> DecisionResult:
             logger.warning(f"plan_routes 失敗: {e}")
             degraded.append("ROUTING_FAILED")
 
-    # ETE 計算
-    try:
-        ete = GATEWAY.calculate_ete(event, bundle)
-    except Exception as e:
-        logger.warning(f"calculate_ete 失敗: {e}")
-        degraded.append("ETE_FAILED")
+    # ETE（所有事件必須有）
+    if ete is None:
+        try:
+            ete = GATEWAY.calculate_ete(event, bundle)
+        except Exception as e:
+            logger.warning(f"calculate_ete 失敗: {e}")
+            degraded.append("ETE_FAILED")
 
     # Agent 建議
     advisory: BedrockAdvisory | None = None
@@ -530,7 +573,7 @@ def handle_incident(event: Incident) -> DecisionResult:
     # 報告生成
     if ete is not None:
         try:
-            report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory)
+            report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory, bundle)
         except Exception as e:
             logger.warning(f"generate_report 失敗: {e}")
         if report_text is None:
@@ -555,10 +598,12 @@ def handle_incident(event: Incident) -> DecisionResult:
         logger.warning(f"generate_report_explanation 失敗（降級）: {e}")
 
     # --- 7. PUSH ---
+    # [2026-07-28架構複查修正：回應SPEC-O3對照表第8項，同 handle_trigger_batch() 的修正]
     from src.models import DataProvenance
-    is_simulated = any(
-        t.provenance != DataProvenance.PROVIDED for t in bundle.traffic
-    ) if bundle.traffic else False
+    is_simulated = (
+        any(t.provenance != DataProvenance.PROVIDED for t in bundle.traffic)
+        or any(c.provenance != DataProvenance.PROVIDED for c in bundle.crowd)
+    )
 
     decision_result = DecisionResult(
         trace_id=trace_id,
@@ -605,18 +650,31 @@ Strands `@tool` 裝飾的函式（`agent/tools.py` 的 `simulate_scenario`）是
 """
 
 
-def handle_user_query(question: str, current_trace_id: str | None, session_id: str, correlation_id: str) -> dict:
+def handle_user_query(
+    question: str,
+    current_trace_id: str | None,
+    session_id: str,
+    correlation_id: str,
+    ws_broadcaster=None,
+) -> dict:
     """前端對話入口，對應 REST POST /api/what-if（[2026-07-28更正] SPEC-O3 原寫
     /api/chat，已改為固定端點名）。
 
     三分支路由（確定性、零LLM，SPEC-O3 §4，優先序：前瞻詞優先於回溯）。
+
+    [2026-07-28架構複查修正：回應2026-07-28_架構圖合規性複查與待辦.md §2.2]
+    `ws_broadcaster` 原本沒有這個參數，導致 `agent/loading.py` 的
+    `chat.loading_start.v1`/`chat.loading_step.v1` 推播雖然兩端都寫好，
+    中間卻永遠斷開（`main.py` 沒有東西可以傳進來）。現在補上參數並轉傳給
+    `process_whatif_request()`（該函式本來就有 `ws_broadcaster` 參數，只是
+    沒人傳），呼叫端見 `main.py::what_if()`。
     """
     from src.agent.whatif_agent import process_whatif_request
     from src.decision_trace import answer_trace_query
 
     if any(word in question for word in _FORWARD_LOOKING_WORDS):
         _current_trace_ctx.set(current_trace_id)
-        result = process_whatif_request(session_id=session_id, content=question)
+        result = process_whatif_request(session_id=session_id, content=question, ws_broadcaster=ws_broadcaster)
         return {"message_type": "whatif.evaluated.v1", "payload": result}
 
     if current_trace_id is not None:

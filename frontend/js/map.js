@@ -58,8 +58,23 @@ function renderMap(container, routes) {
   container.innerHTML = svg;
 }
 
+/**
+ * [2026-07-28架構複查新增] R4 的 saturated_but_retained 例外（唯一合格候選仍飽和時
+ * 保留為主/次線）之前完全沒有視覺標示，選中的路線在地圖上跟正常暢通路線同一種顏色，
+ * 會誤導指揮官——跟 reporting.py 的建議書文字警語是同一個安全疑慮，一起修。
+ * 用橘色（呼應 02-data-contract.md §8「B級橘」的警示色調），優先權高於主/次路線的
+ * 一般配色，避免跟次路線既有的黃色混淆。
+ */
+function _isSaturatedRetained(segId, routes) {
+  const findings = (routes && routes.findings) || [];
+  return findings.some(
+    (f) => f.finding_code === "SATURATED_BUT_RETAINED" && (f.segment_ids || []).includes(segId)
+  );
+}
+
 function getSegmentColor(segId, routes) {
   if (!routes) return "#06b6d4"; // 正常青綠
+  if (_isSaturatedRetained(segId, routes)) return "#f97316"; // 飽和但保留：橘色警示
   if (routes.primary && routes.primary.segment_id === segId) return "#22c55e"; // 主路線亮綠
   if (routes.secondary && routes.secondary.segment_id === segId) return "#eab308"; // 次路線黃
   const excluded = routes.excluded || [];
@@ -70,6 +85,7 @@ function getSegmentColor(segId, routes) {
 
 function getSegmentStroke(segId, routes) {
   if (!routes) return "2";
+  if (_isSaturatedRetained(segId, routes)) return "4"; // 加粗，比照封閉路段的警示強度
   if (routes.primary && routes.primary.segment_id === segId) return "3";
   const excluded = routes.excluded || [];
   if (excluded.some((e) => e.segment_id === segId && e.reason_code === "CLOSED")) return "3";
@@ -78,6 +94,7 @@ function getSegmentStroke(segId, routes) {
 
 function getSegmentDash(segId, routes) {
   if (!routes) return "none";
+  if (_isSaturatedRetained(segId, routes)) return "6,2,1,2"; // 點劃線，跟次路線的純虛線區隔
   if (routes.secondary && routes.secondary.segment_id === segId) return "4,3"; // 虛線
   return "none";
 }

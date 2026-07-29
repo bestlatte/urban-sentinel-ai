@@ -1,0 +1,18 @@
+SOP 第 2 條：車禍與路障應變
+
+觸發條件：事件同時符合三項：
+   (1) status 屬於 {Closed, Blocked, Restricted}
+   (2) severity 屬於 {High, Critical}
+   (3) affected_segment 以 RD_ 開頭 (BS_ 人流類事件改由第 3 條處理)
+
+處置步驟：
+   a. 主疏散路徑：從事故路段的 alternatives 中，篩選同時滿足者：
+        (1) capacity_vph >= 1000；
+        (2) 與事故路段直接相交 (出現在其 intersections 中)；
+        (3) 相交路口位於事故點上游 (依 flow_direction 與 intersections
+            之上游至下游排序判定)。
+      取通過篩選且 Saturation_Score 最低者為主疏散；位於下游之相交幹道僅列次要疏散。
+      若主疏散路段已壅塞 (Saturation_Score >= 0.85)，仍維持該路徑並啟動「長綠燈時制」，
+      於報告註明壅塞並建議併行大眾運輸。
+   b. 產出 CMS 文字：「<事故路段>封閉，請改道 <主疏散路段>，預計延誤 <ETE> 分鐘」
+      (ETE 依第 7 條公式計算。)

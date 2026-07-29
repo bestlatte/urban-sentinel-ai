@@ -1,0 +1,6 @@
+SOP 第 7 條：預計恢復時間 (ETE) 計算
+
+ETE_minutes = base_clearance + congestion_penalty
+   - base_clearance：Critical = 60、High = 40、Medium = 20 (分鐘)。
+   - congestion_penalty = (受影響路段平均 Saturation_Score - 0.5) * 60，小於 0 以 0 計。
+報告須註明 ETE 數值與計算依據。

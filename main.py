@@ -10,6 +10,10 @@
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -31,12 +35,8 @@ orchestrator.GATEWAY = orchestrator.build_gateway()
 
 @app.on_event("startup")
 async def _startup_rule_scan():
-    """啟動時跑一次全量規則評估，觸發 handle_trigger_batch。
-
-    Demo 資料時間跨度短，啟動時掃一次即可讓 Dashboard KPI 有初始值。
-    """
-    import logging
-    logger = logging.getLogger("main.startup")
+    """啟動時跑一次全量規則評估，觸發 handle_trigger_batch。"""
+    global _last_traffic_level
     try:
         bundle = orchestrator.GATEWAY.load_data()
         sensing = orchestrator.GATEWAY.evaluate_rules(bundle, incident=None)
@@ -53,8 +53,84 @@ async def _startup_rule_scan():
             logger.info(f"啟動時規則掃描完成：{len(triggered)} 條規則觸發")
         else:
             logger.info("啟動時規則掃描完成：無規則觸發")
+
+        # 同步 _last_traffic_level，讓背景迴圈第一輪不會誤判為「新轉換」
+        _last_traffic_level = sensing.traffic_level if sensing.traffic_level != "normal" else None
     except Exception as e:
         logger.warning(f"啟動時規則掃描失敗（不影響核心功能）: {e}")
+
+
+_RULE_MONITOR_INTERVAL_SECONDS = 10
+"""背景監測輪詢間隔，落在架構圖規定的 5~15 秒區間內（見
+`.kiro/specs/architecture-reference/模組架構圖_整合版.md` 情境A：
+「後端每 5~15 秒推進一次並以 WebSocket 主動推播」）。"""
+
+_last_traffic_level: str | None = None
+"""上一輪背景監測算出的全市交通等級（"A"/"B"/None），供跟這一輪比較找出轉換。
+只有 `_periodic_rule_monitor` 這個背景迴圈會讀寫，不對外暴露。"""
+
+
+@app.on_event("startup")
+async def _start_periodic_rule_monitor():
+    """啟動背景週期性監測任務。"""
+    import asyncio
+    asyncio.create_task(_periodic_rule_monitor())
+
+
+async def _periodic_rule_monitor() -> None:
+    """背景無限迴圈：每 _RULE_MONITOR_INTERVAL_SECONDS 秒重跑全量規則評估，
+    只在等級轉換時才推播。
+    """
+    import asyncio
+    global _last_traffic_level
+
+    while True:
+        await asyncio.sleep(_RULE_MONITOR_INTERVAL_SECONDS)
+
+        try:
+            bundle = orchestrator.GATEWAY.load_data()
+            sensing = orchestrator.GATEWAY.evaluate_rules(bundle, incident=None)
+            current_level = sensing.traffic_level if sensing.traffic_level != "normal" else None
+
+            if current_level == _last_traffic_level:
+                continue  # 沒有變化，不做任何事
+
+            # 等級轉換
+            logger.info(f"背景監測偵測等級轉換: {_last_traffic_level} → {current_level}")
+
+            # 組 triggered batch 呼叫 handle_trigger_batch
+            triggered = []
+            seen_sections = set()
+            for hit in sensing.rule_hits:
+                section = hit.clause_id.replace("SOP-", "")
+                if section not in seen_sections:
+                    seen_sections.add(section)
+                    triggered.append({"section": int(section), "clause_id": hit.clause_id})
+
+            if triggered:
+                orchestrator.handle_trigger_batch(triggered)
+
+            # 推播 decision.alert.v1（升級時）
+            if current_level in ("A", "B"):
+                await ws_manager.broadcast({
+                    "message_type": "decision.alert.v1",
+                    "payload": {
+                        "level": current_level,
+                        "description": "背景監測偵測到全市交通等級變化",
+                        "ete_minutes": None,
+                    },
+                })
+
+            # 推播 dashboard.updated.v1
+            await ws_manager.broadcast({
+                "message_type": "dashboard.updated.v1",
+                "payload": {"level": current_level},
+            })
+
+            _last_traffic_level = current_level
+
+        except Exception as e:
+            logger.warning(f"背景規則監測失敗: {e}")
 
 # frontend/ 以 StaticFiles(html=True) 掛在 /，API 前綴 /api 與 /ws 不會被靜態路由吃掉。
 app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
@@ -254,6 +330,7 @@ async def what_if(body: dict):
         current_trace_id=current_trace_id,
         session_id=session_id,
         correlation_id=correlation_id,
+        ws_broadcaster=ws_manager.broadcast,
     )
 
     message_type = result["message_type"]
