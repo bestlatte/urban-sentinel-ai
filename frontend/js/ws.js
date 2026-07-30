@@ -130,6 +130,15 @@ function handleServerMessage(msg) {
       // 確認清除完成
       break;
 
+    // ===== Simulation 相關推播 =====
+    case "simulation.state.v1":
+      if (typeof onSimulationState === "function") onSimulationState(payload);
+      break;
+
+    case "simulation.tick.v1":
+      if (typeof onSimulationTick === "function") onSimulationTick(payload);
+      break;
+
     default:
       console.log("[WS] 未處理的 message_type:", type);
   }

@@ -22,6 +22,17 @@
       <div class="header-title">CityNexus</div>
       <div class="header-subtitle">Traffic Command Center</div>
     </div>
+    <!-- Page Navigation -->
+    <nav class="page-nav" id="page-nav">
+      <button class="page-nav-btn active" data-page="dashboard" onclick="switchPage('dashboard')">
+        <span class="page-nav-icon">📊</span>
+        <span class="page-nav-label">Dashboard</span>
+      </button>
+      <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')">
+        <span class="page-nav-icon">📋</span>
+        <span class="page-nav-label">Activity Log</span>
+      </button>
+    </nav>
     <div class="header-right">
       <div class="header-indicator">
         <span class="status-dot"></span>
@@ -31,58 +42,151 @@
     </div>
   </header>
 
-  <!-- Main Layout -->
-  <div class="layout">
-    <!-- Left Column -->
-    <div class="col-left">
-      <!-- KPI Row -->
-      <section class="section" id="f1-kpi">
-        <div class="kpi-card" data-kpi="active_incident_count"></div>
-        <div class="kpi-card" data-kpi="current_level"></div>
-        <div class="kpi-card" data-kpi="average_saturation"></div>
-        <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
-        <div class="kpi-card" data-kpi="system_mode"></div>
-      </section>
+  <!-- Page: Dashboard (default) -->
+  <div class="page-content" id="page-dashboard">
+    <!-- Main Layout -->
+    <div class="layout">
+      <!-- Left Column -->
+      <div class="col-left">
+        <!-- KPI Row -->
+        <section class="section" id="f1-kpi">
+          <div class="kpi-card" data-kpi="active_incident_count"></div>
+          <div class="kpi-card" data-kpi="current_level"></div>
+          <div class="kpi-card" data-kpi="average_saturation"></div>
+          <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
+          <div class="kpi-card" data-kpi="system_mode"></div>
+        </section>
 
-      <!-- Chart -->
-      <section class="section card" id="f1-charts">
-        <div class="section-header">Traffic Flow</div>
-      </section>
+        <!-- Chart -->
+        <section class="section card" id="f1-charts">
+          <div class="section-header">Traffic Flow</div>
+        </section>
 
-      <!-- Road Network -->
-      <section class="section card" id="f4-map">
-        <div class="section-header">Road Network Topology</div>
-      </section>
+        <!-- Road Network -->
+        <section class="section card" id="f4-map">
+          <div class="section-header">Road Network Topology</div>
+        </section>
+      </div>
+
+      <!-- Right Column -->
+      <div class="col-right">
+        <!-- Time Simulation Control -->
+        <section class="section card" id="simulation-panel">
+          <div class="section-header">Time Simulation</div>
+          <div class="sim-status" id="sim-status">
+            <span class="sim-status-dot"></span>
+            <span class="sim-status-text">未啟動</span>
+          </div>
+          <div class="sim-time-display">
+            <div class="sim-time-label">模擬時間</div>
+            <div class="sim-time-value" id="sim-current-time">--:--</div>
+          </div>
+          <div class="sim-timeline">
+            <input type="range" id="sim-slider" min="0" max="100" value="0" disabled>
+            <div class="sim-timeline-labels">
+              <span id="sim-start-time">17:00</span>
+              <span id="sim-end-time">23:30</span>
+            </div>
+          </div>
+          <div class="sim-controls">
+            <button id="sim-start-btn" class="sim-btn" onclick="simStart()">啟動模擬</button>
+            <button id="sim-play-btn" class="sim-btn" onclick="simPlay()" disabled>▶ 播放</button>
+            <button id="sim-pause-btn" class="sim-btn" onclick="simPause()" disabled>⏸ 暫停</button>
+            <button id="sim-reset-btn" class="sim-btn" onclick="simReset()" disabled>⏪ 重置</button>
+          </div>
+          <div class="sim-speed">
+            <label>播放速度：</label>
+            <select id="sim-speed-select">
+              <option value="30">1秒 = 30秒</option>
+              <option value="60" selected>1秒 = 1分鐘</option>
+              <option value="300">1秒 = 5分鐘</option>
+              <option value="600">1秒 = 10分鐘</option>
+            </select>
+          </div>
+        </section>
+
+        <!-- Event Injection -->
+        <section class="section card" id="f3-inject">
+          <div class="section-header">Event Injection</div>
+          <form id="incident-inject-form"></form>
+        </section>
+
+        <!-- Active Incidents by Level -->
+        <section class="section card" id="f2-incidents-panel">
+          <div class="section-header">Active Incidents</div>
+          <div class="incidents-grid">
+            <div class="incident-box level-a collapsed" id="incident-box-a">
+              <div class="incident-box-header" onclick="toggleIncidentBox('a')">
+                <span class="incident-box-title">A 級事件</span>
+                <span class="incident-box-count" id="incident-count-a">(0)</span>
+                <span class="incident-box-toggle">▼</span>
+              </div>
+              <div class="incident-box-preview" id="incident-preview-a">無事件</div>
+              <div class="incident-box-list" id="incident-list-a"></div>
+            </div>
+            <div class="incident-box level-b collapsed" id="incident-box-b">
+              <div class="incident-box-header" onclick="toggleIncidentBox('b')">
+                <span class="incident-box-title">B 級事件</span>
+                <span class="incident-box-count" id="incident-count-b">(0)</span>
+                <span class="incident-box-toggle">▼</span>
+              </div>
+              <div class="incident-box-preview" id="incident-preview-b">無事件</div>
+              <div class="incident-box-list" id="incident-list-b"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Advisory Report (擴大區域，原本 F7 的空間也給它) -->
+        <section class="section card report-expanded" id="f5-report">
+          <div class="section-header section-header-with-btn">
+            <span>Advisory Report</span>
+            <button class="expand-btn" id="expand-report-btn" disabled>放大檢視</button>
+          </div>
+          <div id="f5-report-content"></div>
+        </section>
+      </div>
     </div>
+  </div>
 
-    <!-- Right Column -->
-    <div class="col-right">
-      <!-- Event Injection -->
-      <section class="section card" id="f3-inject">
-        <div class="section-header">Event Injection</div>
-        <form id="incident-inject-form"></form>
-      </section>
-
-      <!-- Decision Trace -->
-      <section class="section card" id="f7-decision-basis">
-        <nav class="f7-tabs">
-          <button data-tab="activity" class="active">Activity</button>
+  <!-- Page: Activity Log -->
+  <div class="page-content" id="page-activity" hidden>
+    <div class="activity-page-layout">
+      <!-- 左側：事件列表 -->
+      <aside class="activity-sidebar">
+        <div class="activity-sidebar-header">事件列表</div>
+        <div class="activity-event-list" id="activity-event-list">
+          <div class="activity-empty">尚無事件紀錄</div>
+        </div>
+      </aside>
+      <!-- 右側：事件詳細 Log -->
+      <main class="activity-main">
+        <div class="activity-main-header" id="activity-main-header">選擇事件查看詳情</div>
+        <nav class="f7-tabs" id="activity-tabs" hidden>
+          <button data-tab="activity" class="active">Activity Feed</button>
           <button data-tab="basis">Decision Basis</button>
         </nav>
-        <div id="f7-activity-feed" data-tab-panel="activity"></div>
-        <div id="f7-basis-detail" data-tab-panel="basis" hidden></div>
-      </section>
-
-      <!-- Advisory Report -->
-      <section class="section card" id="f5-report">
-        <div class="section-header">Advisory Report</div>
-        <div id="f5-report-content"></div>
-      </section>
+        <div class="activity-detail-content">
+          <div id="f7-activity-feed" data-tab-panel="activity"></div>
+          <div id="f7-basis-detail" data-tab-panel="basis" hidden></div>
+        </div>
+      </main>
     </div>
   </div>
 
   <!-- Alert Modal -->
   <div id="f2-alert-modal" hidden></div>
+
+  <!-- Report Modal (放大報告) -->
+  <div id="report-modal" hidden>
+    <div class="report-modal-content">
+      <button class="report-modal-close" onclick="closeReportModal()">關閉</button>
+      <div class="report-modal-title">Advisory Report</div>
+      <div id="report-modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Alert Stack (堆疊式預警通知) -->
+  <div id="alert-stack" class="alert-stack"></div>
 
   <!-- Chat Panel -->
   <button id="chat-toggle-btn" class="chat-fab">💬</button>

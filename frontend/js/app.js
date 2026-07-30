@@ -13,6 +13,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   initF7Tabs();
   initF3InjectForm();
   initHeaderClock();
+  initExpandReportBtn();
+  initPageNav();
+  initSimulation();
 
   // 載入初始 Dashboard 資料
   try {
@@ -27,6 +30,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     console.warn("初始 Dashboard 載入失敗:", e);
   }
 });
+
+// --- 頁面切換 ---
+function initPageNav() {
+  // 頁面切換已在 HTML onclick 處理，這裡可加額外初始化邏輯
+}
+
+function switchPage(pageName) {
+  // 更新導航按鈕狀態
+  document.querySelectorAll(".page-nav-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.page === pageName);
+  });
+  
+  // 切換頁面內容
+  document.querySelectorAll(".page-content").forEach(page => {
+    page.hidden = page.id !== `page-${pageName}`;
+  });
+}
 
 // --- F1 KPI ---
 function renderKpis(kpis) {
@@ -72,18 +92,29 @@ function renderActiveIncidentsList(incidents) {
 }
 
 // --- WS 回呼 ---
+const _processedTraceIds = new Set();
+
 function onDashboardUpdated(payload) {
   if (payload && payload.kpis) renderDashboard(payload);
 }
 
 function onDecisionCompleted(decision) {
   if (!decision) return;
+  // 用 trace_id 去重（REST 回應 + WS 推播會各呼叫一次，避免重複計數）
+  if (decision.trace_id && _processedTraceIds.has(decision.trace_id)) return;
+  if (decision.trace_id) _processedTraceIds.add(decision.trace_id);
+  
+  // 記錄到 Activity Log
+  _recordDecisionForActivity(decision);
+  
   // 更新 F4 路網圖
   if (decision.routes) updateMap(decision.routes);
   // 更新 F5 報告（結構化摘要 + 全文）
   renderReportCard(decision);
   // 更新 F7 決策依據
   renderDecisionBasis(decision);
+  // 將事件加入對應等級的框
+  addIncidentToLevelBox(decision);
   // 更新 KPI（事件數）
   const countCard = document.querySelectorAll(".kpi-card")[0];
   if (countCard) {
@@ -98,6 +129,67 @@ function onDecisionCompleted(decision) {
       levelCard.innerHTML = `<div class="kpi-value" style="color:${color}">${decision.level}</div><div class="kpi-label">最高應變等級</div>`;
     }
   }
+}
+
+// --- F2 事件分類到對應等級框 ---
+function toggleIncidentBox(level) {
+  const box = document.getElementById(`incident-box-${level}`);
+  if (box) {
+    box.classList.toggle("collapsed");
+  }
+}
+
+function updateIncidentCount(level) {
+  const list = document.getElementById(`incident-list-${level}`);
+  const countEl = document.getElementById(`incident-count-${level}`);
+  const previewEl = document.getElementById(`incident-preview-${level}`);
+  
+  if (!list || !countEl) return;
+  
+  const count = list.querySelectorAll(".incident-item").length;
+  countEl.textContent = `(${count})`;
+  
+  // 更新預覽文字
+  if (previewEl) {
+    if (count === 0) {
+      previewEl.textContent = "無事件";
+    } else {
+      const lastItem = list.querySelector(".incident-item:last-child");
+      const title = lastItem?.querySelector(".incident-item-title")?.textContent || "";
+      previewEl.textContent = count === 1 ? title : `${title} 等 ${count} 筆`;
+    }
+  }
+}
+
+function addIncidentToLevelBox(decision) {
+  if (!decision || !decision.level) return;
+  
+  const level = decision.level.toLowerCase();
+  const listId = `incident-list-${level}`;
+  const list = document.getElementById(listId);
+  if (!list) return;
+  
+  const eventId = decision.incident?.event_id || decision.trace_id;
+  // 檢查是否已存在（避免重複）
+  if (list.querySelector(`[data-event-id="${eventId}"]`)) return;
+  
+  const title = decision.incident?.description || decision.incident?.type || "未知事件";
+  const location = decision.incident?.location || "";
+  const eteMinutes = decision.ete?.minutes;
+  const recoveryAt = decision.ete?.recovery_at;
+  
+  const itemHtml = `
+    <div class="incident-item" data-event-id="${escapeHtml(eventId)}">
+      <div class="incident-item-title">${escapeHtml(title)}</div>
+      ${location ? `<div class="incident-item-location">${escapeHtml(location)}</div>` : ""}
+      ${eteMinutes ? `<div class="incident-item-ete">ETE: <strong>${eteMinutes}</strong> 分鐘${recoveryAt ? ` · 預計 ${escapeHtml(recoveryAt)}` : ""}</div>` : ""}
+    </div>
+  `;
+  
+  list.insertAdjacentHTML("beforeend", itemHtml);
+  
+  // 更新計數和預覽
+  updateIncidentCount(level);
 }
 
 function onRulesEvaluated(sensing) {
@@ -118,20 +210,62 @@ function onRulesEvaluated(sensing) {
   }
 }
 
-// --- F2 異常彈窗 ---
+// --- F2 異常彈窗（堆疊式通知）---
+let alertCounter = 0;
+
 function showAlertModal(payload) {
-  const modal = document.getElementById("f2-alert-modal");
-  if (!modal) return;
+  const stack = document.getElementById("alert-stack");
+  if (!stack) return;
+  
   const isA = payload.level === "A";
   const levelLabel = isA ? "A 級警報" : "B 級警報";
-  const levelColor = isA ? "hsl(0,84%,60%)" : "hsl(25,95%,53%)";
-  modal.innerHTML = `<div class="alert-content">
-    <div style="font-size:0.65rem;font-weight:600;letter-spacing:0.05em;color:${levelColor};margin-bottom:12px">${levelLabel}</div>
-    <p style="font-size:0.875rem;color:hsl(0,0%,85%);line-height:1.6;margin-bottom:8px">${escapeHtml(payload.description || "")}</p>
-    ${payload.ete_minutes ? `<p style="font-size:0.8rem;color:hsl(0,0%,50%)">預計恢復：${payload.ete_minutes} 分鐘</p>` : ""}
-    <button onclick="dismissAlert()" style="margin-top:20px;padding:8px 20px;background:hsl(0,0%,95%);color:hsl(0,0%,5%);border:none;border-radius:6px;cursor:pointer;font-size:0.8rem;font-weight:600">確認</button>
-  </div>`;
-  modal.hidden = false;
+  const levelClass = isA ? "level-a" : "level-b";
+  
+  const alertId = `alert-${++alertCounter}`;
+  
+  // 判斷是「事件注入」還是「模擬器路段預警」
+  const isIncidentAlert = payload.ete_minutes !== undefined || !payload.road_name;
+  
+  let roadName, description, extraInfo;
+  
+  if (isIncidentAlert) {
+    // 事件注入的彈窗
+    roadName = "事件通報";
+    description = payload.description || "決策完成";
+    extraInfo = payload.ete_minutes ? `預計恢復時間：${payload.ete_minutes} 分鐘` : "";
+  } else {
+    // 模擬器路段飽和度預警
+    roadName = payload.road_name || "未知路段";
+    const satPercent = payload.saturation ? `${(payload.saturation * 100).toFixed(0)}%` : "";
+    description = `飽和度：${satPercent}`;
+    extraInfo = "";
+  }
+  
+  const timeStr = payload.description?.match(/\[(\d+:\d+)\]/)?.[1] || "";
+  
+  const alertEl = document.createElement("div");
+  alertEl.className = `alert-item ${levelClass}`;
+  alertEl.id = alertId;
+  alertEl.innerHTML = `
+    <div class="alert-item-header">
+      <span class="alert-item-level">${levelLabel}</span>
+      <span class="alert-item-time">${timeStr}</span>
+    </div>
+    <div class="alert-item-road">${escapeHtml(roadName)}</div>
+    <div class="alert-item-desc">${escapeHtml(description)}</div>
+    ${extraInfo ? `<div class="alert-item-extra">${escapeHtml(extraInfo)}</div>` : ""}
+    <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')">確認</button>
+  `;
+  
+  stack.appendChild(alertEl);
+}
+
+function dismissAlertItem(alertId) {
+  const alertEl = document.getElementById(alertId);
+  if (alertEl) {
+    alertEl.style.animation = "alertSlideIn 0.2s ease-out reverse";
+    setTimeout(() => alertEl.remove(), 200);
+  }
 }
 
 function dismissAlert() {
@@ -148,26 +282,142 @@ function initF3InjectForm() {
     { id: "TPE_2026_EVT_002", label: "人群推擠（國父紀念館站）" },
     { id: "TPE_2026_EVT_003", label: "號誌故障（松高路）" },
   ];
-  form.innerHTML = events.map(e =>
-    `<button type="button" onclick="injectIncident('${e.id}')">${e.label}</button>`
-  ).join("");
+  form.innerHTML = `
+    <div style="margin-bottom:8px;font-size:0.65rem;color:var(--text-muted);">固定測試事件</div>
+    ${events.map(e => `<button type="button" onclick="injectIncident('${e.id}')">${e.label}</button>`).join("")}
+    <div style="margin:12px 0 8px;padding-top:10px;border-top:1px solid var(--border);font-size:0.65rem;color:var(--text-muted);">模擬事件</div>
+    <button type="button" onclick="generateRandomIncident()" style="background:linear-gradient(135deg, hsl(200,70%,40%), hsl(260,70%,50%));color:white;border:none;">🎲 模擬隨機事件</button>
+    <button type="button" onclick="resetSystem()" style="margin-top:4px;background:transparent;color:var(--text-muted);border-color:var(--border);">🔄 重設系統</button>
+  `;
 }
 
-async function injectIncident(eventId) {
+// 生成隨機事件
+async function generateRandomIncident() {
   try {
+    const res = await fetch("/api/incidents/generate", { method: "POST" });
+    const data = await res.json();
+    if (data.status === "ok" && data.payload) {
+      const decision = data.payload;
+      onDecisionCompleted(decision);
+      // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
+    } else if (data.errors) {
+      console.warn("生成事件失敗:", data.errors);
+    }
+  } catch (e) {
+    console.warn("生成事件失敗:", e);
+  }
+}
+
+// 重設系統狀態
+async function resetSystem() {
+  if (!confirm("確定要重設系統？這會清空所有進行中的事件。")) return;
+  
+  try {
+    const res = await fetch("/api/reset", { method: "POST" });
+    const data = await res.json();
+    if (data.status === "ok") {
+      // 清空前端狀態
+      _injectedEventIds.clear();
+      _allDecisions.clear();
+      _activityByEvent.clear();
+      _processedTraceIds.clear();
+      _currentEventId = null;
+      _selectedActivityEventId = null;
+      _lastInjectedEventId = null;
+      
+      // 重新載入 Dashboard
+      const dashData = await fetchDashboard();
+      if (dashData.status === "ok" && dashData.payload) {
+        renderDashboard(dashData.payload);
+      }
+      
+      // 重新初始化注入表單（恢復按鈕狀態）
+      initF3InjectForm();
+      
+      // 清空各區域
+      document.getElementById("f5-report-content").innerHTML = "";
+      document.getElementById("f7-activity-feed").innerHTML = "";
+      document.getElementById("f7-basis-detail").innerHTML = "";
+      document.getElementById("incident-list-a").innerHTML = "";
+      document.getElementById("incident-list-b").innerHTML = "";
+      document.getElementById("activity-event-list").innerHTML = '<div class="activity-empty">尚無事件紀錄</div>';
+      
+      // 更新計數
+      updateIncidentCount("a");
+      updateIncidentCount("b");
+      
+      alert("系統已重設");
+    }
+  } catch (e) {
+    console.warn("重設失敗:", e);
+    alert("重設失敗");
+  }
+}
+
+// 追蹤已注入的事件（避免重複注入）
+const _injectedEventIds = new Set();
+
+async function injectIncident(eventId) {
+  // 檢查是否已注入過
+  if (_injectedEventIds.has(eventId)) {
+    console.log(`事件 ${eventId} 已注入，跳過重複請求`);
+    return;
+  }
+  
+  try {
+    _lastInjectedEventId = eventId; // 記錄當前注入的事件
+    _injectedEventIds.add(eventId); // 標記為已注入
+    
+    // 禁用該按鈕
+    const btn = document.querySelector(`button[onclick="injectIncident('${eventId}')"]`);
+    if (btn) {
+      btn.disabled = true;
+      btn.style.opacity = "0.5";
+      btn.style.cursor = "not-allowed";
+      btn.textContent = btn.textContent + " ✓";
+    }
+    
     const data = await fetchEvaluateIncident(eventId);
     if (data.status === "ok" && data.payload) {
-      onDecisionCompleted(data.payload);
+      const decision = data.payload;
+      onDecisionCompleted(decision);
+      // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
     }
   } catch (e) {
     console.warn("事件注入失敗:", e);
+    // 注入失敗時移除標記，允許重試
+    _injectedEventIds.delete(eventId);
   }
 }
 
 // --- F5 報告卡片（結構化摘要 + 全文） ---
+const _allDecisions = new Map(); // key=event_id, value=decision
+let _currentEventId = null; // 目前顯示的事件
+
 function renderReportCard(decision) {
   const container = document.getElementById("f5-report-content");
   if (!container) return;
+
+  // 存入 Map（用 event_id 作為 key）
+  const eventId = decision.incident?.event_id || decision.trace_id;
+  _allDecisions.set(eventId, decision);
+  _currentEventId = eventId;
+
+  // 更新事件切換 tabs
+  _renderReportTabs();
+
+  // 渲染報告內容
+  _renderReportContent(decision);
+}
+
+// 渲染報告內容（抽出成獨立函式）
+function _renderReportContent(decision) {
+  const container = document.getElementById("f5-report-content");
+  if (!container) return;
+
+  // 啟用放大按鈕
+  const expandBtn = document.getElementById("expand-report-btn");
+  if (expandBtn) expandBtn.disabled = false;
 
   let html = "";
 
@@ -231,25 +481,174 @@ function renderReportCard(decision) {
   container.innerHTML = html;
 }
 
+// 渲染事件切換 tabs
+function _renderReportTabs() {
+  const section = document.getElementById("f5-report");
+  if (!section) return;
+
+  let tabsContainer = document.getElementById("f5-report-tabs");
+  if (!tabsContainer) {
+    tabsContainer = document.createElement("div");
+    tabsContainer.id = "f5-report-tabs";
+    tabsContainer.style.cssText = "display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border);overflow-x:auto;flex-wrap:nowrap;";
+    // 插入到 section-header 之後
+    const header = section.querySelector(".section-header");
+    if (header && header.nextSibling) {
+      section.insertBefore(tabsContainer, header.nextSibling);
+    } else {
+      section.insertBefore(tabsContainer, section.firstChild.nextSibling);
+    }
+  }
+
+  // 建立 tabs
+  let tabsHtml = "";
+  for (const [eventId, dec] of _allDecisions) {
+    const isActive = eventId === _currentEventId;
+    const label = dec.incident?.description || dec.incident?.type || eventId;
+    const shortLabel = label.length > 12 ? label.substring(0, 12) + "…" : label;
+    const levelColor = dec.level === "A" ? "var(--level-a)" : dec.level === "B" ? "var(--level-b)" : "var(--text-muted)";
+    tabsHtml += `<button 
+      onclick="switchReportTab('${escapeHtml(eventId)}')" 
+      style="padding:4px 10px;border-radius:4px;font-size:0.68rem;border:1px solid ${isActive ? levelColor : 'var(--border)'};
+             background:${isActive ? 'var(--bg-elevated)' : 'transparent'};color:${isActive ? levelColor : 'var(--text-muted)'};
+             cursor:pointer;white-space:nowrap;transition:all 0.15s;"
+      title="${escapeHtml(label)}"
+    >${shortLabel}</button>`;
+  }
+  tabsContainer.innerHTML = tabsHtml;
+
+  // 如果只有一個事件，隱藏 tabs
+  tabsContainer.style.display = _allDecisions.size <= 1 ? "none" : "flex";
+}
+
+// 切換報告 tab
+function switchReportTab(eventId) {
+  if (!_allDecisions.has(eventId)) return;
+  _currentEventId = eventId;
+  const decision = _allDecisions.get(eventId);
+  _renderReportTabs();
+  _renderReportContent(decision);
+}
+
+// --- 報告放大彈窗 ---
+function openReportModal() {
+  if (!_currentEventId || !_allDecisions.has(_currentEventId)) return;
+  const modal = document.getElementById("report-modal");
+  const body = document.getElementById("report-modal-body");
+  if (!modal || !body) return;
+
+  const d = _allDecisions.get(_currentEventId);
+  let html = "";
+
+  // 結構化摘要（放大版）
+  html += `<div class="report-summary">`;
+  // 左欄：事件
+  html += `<div>`;
+  if (d.incident) {
+    html += `<div class="report-section-label">EVENT</div>`;
+    html += `<div style="font-size:1.1rem;font-weight:600;color:var(--text);margin-bottom:4px">${escapeHtml(d.incident.description || d.incident.type)}</div>`;
+    html += `<div style="font-size:0.85rem;color:var(--text-muted)">${escapeHtml(d.incident.location || "")}</div>`;
+    if (d.level) {
+      const lColor = d.level === "A" ? "var(--level-a)" : "var(--level-b)";
+      html += `<div style="margin-top:12px;display:inline-block;padding:4px 12px;border-radius:6px;font-size:0.8rem;font-weight:600;color:${lColor};border:2px solid ${lColor}">${d.level} 級警報</div>`;
+    }
+  }
+  html += `</div>`;
+  // 右欄：ETE + 路線
+  html += `<div>`;
+  if (d.ete) {
+    html += `<div class="report-section-label">預計恢復時間 (ETE)</div>`;
+    html += `<div style="font-size:2.2rem;font-weight:700;color:var(--text);letter-spacing:-0.03em">${d.ete.minutes} <span style="font-size:0.9rem;font-weight:400;color:var(--text-muted)">分鐘</span></div>`;
+    html += `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;font-variant-numeric:tabular-nums">${escapeHtml(d.ete.formula || "")}</div>`;
+    if (d.ete.recovery_at) html += `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">預計恢復：${d.ete.recovery_at}</div>`;
+  }
+  if (d.routes) {
+    html += `<div style="margin-top:16px;font-size:0.9rem">`;
+    if (d.routes.primary) html += `<div style="margin-bottom:4px"><span style="color:hsl(142,71%,45%)">●</span> <strong>主路線</strong> ${escapeHtml(d.routes.primary.name)}</div>`;
+    if (d.routes.secondary) html += `<div><span style="color:hsl(48,96%,53%)">●</span> <strong>次路線</strong> ${escapeHtml(d.routes.secondary.name)}</div>`;
+    html += `</div>`;
+  }
+  html += `</div>`;
+  html += `</div>`;
+
+  // 多語簡訊
+  if (d.notifications) {
+    html += `<div class="report-section">`;
+    html += `<div class="report-section-label">多語通報簡訊</div>`;
+    html += `<div class="report-notifications">`;
+    const n = d.notifications;
+    if (n.zh) html += `<div class="report-notif-item"><span class="report-notif-lang">ZH</span>${escapeHtml(n.zh)}</div>`;
+    if (n.en) html += `<div class="report-notif-item"><span class="report-notif-lang">EN</span>${escapeHtml(n.en)}</div>`;
+    if (n.ja) html += `<div class="report-notif-item"><span class="report-notif-lang">JA</span>${escapeHtml(n.ja)}</div>`;
+    if (n.ko) html += `<div class="report-notif-item"><span class="report-notif-lang">KO</span>${escapeHtml(n.ko)}</div>`;
+    html += `</div></div>`;
+  }
+
+  // 建議書全文
+  if (d.control_center_report) {
+    html += `<div class="report-section">`;
+    html += `<div class="report-section-label">交控建議書全文</div>`;
+    html += `<div class="report-full-text">${escapeHtml(d.control_center_report)}</div>`;
+    html += `</div>`;
+  }
+
+  // 元資訊
+  html += `<div class="report-meta">`;
+  html += `<span>Trace ID: ${d.trace_id || "—"}</span>`;
+  html += `<span>處理耗時: ${d.duration_ms || 0}ms</span>`;
+  if (d.degraded && d.degraded.length) html += `<span style="color:var(--level-b)">降級: ${d.degraded.join(", ")}</span>`;
+  html += `</div>`;
+
+  body.innerHTML = html;
+  modal.hidden = false;
+}
+
+function closeReportModal() {
+  const modal = document.getElementById("report-modal");
+  if (modal) modal.hidden = true;
+}
+
+// 初始化放大按鈕
+function initExpandReportBtn() {
+  const btn = document.getElementById("expand-report-btn");
+  if (btn) {
+    btn.addEventListener("click", openReportModal);
+  }
+}
+
 // --- F7 決策依據分頁 ---
+// Activity Log 資料結構：以 event_id 為 key 存放各事件的 log
+const _activityByEvent = new Map(); // key=event_id, value={decision, logs:[]}
+let _selectedActivityEventId = null;
+
 function initF7Tabs() {
-  const buttons = document.querySelectorAll(".f7-tabs button");
-  buttons.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const tab = btn.dataset.tab;
-      buttons.forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      document.getElementById("f7-activity-feed").hidden = tab !== "activity";
-      document.getElementById("f7-basis-detail").hidden = tab !== "basis";
+  // Activity 頁面的 tabs
+  const tabsContainer = document.getElementById("activity-tabs");
+  if (tabsContainer) {
+    const buttons = tabsContainer.querySelectorAll("button");
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = btn.dataset.tab;
+        buttons.forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById("f7-activity-feed").hidden = tab !== "activity";
+        document.getElementById("f7-basis-detail").hidden = tab !== "basis";
+      });
     });
-  });
-  // 預設顯示即時活動
-  if (buttons[0]) buttons[0].classList.add("active");
+  }
 }
 
 function appendActivityEntry(type, payload) {
-  const feed = document.getElementById("f7-activity-feed");
-  if (!feed) return;
+  // 先取得 event_id（從 payload 或從目前注入的事件）
+  let eventId = payload.event_id || payload.triggered_by?.[0] || _lastInjectedEventId;
+  if (!eventId) return;
+  
+  // 確保該事件已在 Map 中
+  if (!_activityByEvent.has(eventId)) {
+    _activityByEvent.set(eventId, { decision: null, logs: [] });
+  }
+  
+  const eventData = _activityByEvent.get(eventId);
   const time = formatTime(new Date().toISOString());
 
   let label, detail, color;
@@ -272,15 +671,124 @@ function appendActivityEntry(type, payload) {
     color = clr;
   }
 
-  feed.insertAdjacentHTML("beforeend",
-    `<div style="font-size:0.72rem;padding:5px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
-      <span style="color:var(--text-muted);min-width:42px;font-variant-numeric:tabular-nums;font-size:0.65rem">${time}</span>
-      <span style="color:${color};font-weight:500">${label}</span>
-      <span style="color:var(--text-muted);font-size:0.68rem">${detail}</span>
-    </div>`
-  );
-  feed.scrollTop = feed.scrollHeight;
+  // 存入該事件的 logs
+  eventData.logs.push({ time, label, detail, color });
+  
+  // 更新事件列表
+  _renderActivityEventList();
+  
+  // 如果當前選中的是這個事件，即時更新 feed
+  if (_selectedActivityEventId === eventId) {
+    _renderActivityFeed(eventId);
+  }
 }
+
+// 當 decision 完成時，也要記錄到對應事件
+function _recordDecisionForActivity(decision) {
+  if (!decision) return;
+  const eventId = decision.incident?.event_id || decision.trace_id;
+  if (!eventId) return;
+  
+  if (!_activityByEvent.has(eventId)) {
+    _activityByEvent.set(eventId, { decision: null, logs: [] });
+  }
+  
+  const eventData = _activityByEvent.get(eventId);
+  eventData.decision = decision;
+  
+  // 更新事件列表
+  _renderActivityEventList();
+}
+
+// 渲染左側事件列表
+function _renderActivityEventList() {
+  const list = document.getElementById("activity-event-list");
+  if (!list) return;
+  
+  if (_activityByEvent.size === 0) {
+    list.innerHTML = '<div class="activity-empty">尚無事件紀錄</div>';
+    return;
+  }
+  
+  let html = "";
+  for (const [eventId, data] of _activityByEvent) {
+    const isActive = eventId === _selectedActivityEventId;
+    const decision = data.decision;
+    const title = decision?.incident?.description || decision?.incident?.type || eventId;
+    const level = decision?.level || "";
+    const levelClass = level ? `level-${level.toLowerCase()}` : "";
+    const logCount = data.logs.length;
+    
+    html += `
+      <div class="activity-event-item ${levelClass} ${isActive ? 'active' : ''}" 
+           onclick="selectActivityEvent('${escapeHtml(eventId)}')">
+        <div class="activity-event-title">${escapeHtml(title)}</div>
+        <div class="activity-event-meta">
+          ${level ? `<span class="activity-event-level ${levelClass}">${level} 級</span>` : ''}
+          <span class="activity-event-time">${logCount} 筆紀錄</span>
+        </div>
+      </div>
+    `;
+  }
+  
+  list.innerHTML = html;
+}
+
+// 選擇事件
+function selectActivityEvent(eventId) {
+  _selectedActivityEventId = eventId;
+  
+  // 更新列表 active 狀態
+  _renderActivityEventList();
+  
+  // 顯示 tabs
+  const tabs = document.getElementById("activity-tabs");
+  if (tabs) tabs.hidden = false;
+  
+  // 更新 header
+  const header = document.getElementById("activity-main-header");
+  const eventData = _activityByEvent.get(eventId);
+  if (header && eventData) {
+    const title = eventData.decision?.incident?.description || eventData.decision?.incident?.type || eventId;
+    header.textContent = title;
+  }
+  
+  // 渲染 Activity Feed
+  _renderActivityFeed(eventId);
+  
+  // 渲染 Decision Basis
+  if (eventData?.decision) {
+    renderDecisionBasis(eventData.decision);
+  }
+}
+
+// 渲染特定事件的 Activity Feed
+function _renderActivityFeed(eventId) {
+  const feed = document.getElementById("f7-activity-feed");
+  if (!feed) return;
+  
+  const eventData = _activityByEvent.get(eventId);
+  if (!eventData || eventData.logs.length === 0) {
+    feed.innerHTML = '<div style="color:var(--text-muted);font-size:0.75rem;padding:12px 0;">無活動紀錄</div>';
+    return;
+  }
+  
+  let html = "";
+  for (const log of eventData.logs) {
+    html += `
+      <div style="font-size:0.78rem;padding:8px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+        <span style="color:var(--text-muted);min-width:48px;font-variant-numeric:tabular-nums;font-size:0.7rem">${log.time}</span>
+        <span style="color:${log.color};font-weight:500">${log.label}</span>
+        <span style="color:var(--text-muted);font-size:0.72rem">${log.detail}</span>
+      </div>
+    `;
+  }
+  
+  feed.innerHTML = html;
+}
+
+// 追蹤最後注入的事件 ID（供 appendActivityEntry 參考）
+let _lastInjectedEventId = null;
 
 function renderDecisionBasis(decision) {
   const panel = document.getElementById("f7-basis-detail");
@@ -352,4 +860,208 @@ function initHeaderClock() {
   }
   tick();
   setInterval(tick, 1000);
+}
+
+
+// ========== Time Simulation Controls ==========
+
+const SimState = {
+  enabled: false,
+  playing: false,
+  startTime: null,  // Date
+  endTime: null,    // Date
+  currentTime: null, // Date
+};
+
+function parseISOTime(isoStr) {
+  if (!isoStr) return null;
+  return new Date(isoStr);
+}
+
+function formatSimTime(date) {
+  if (!date) return "--:--";
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function updateSimUI() {
+  const statusEl = document.getElementById("sim-status");
+  const statusText = statusEl?.querySelector(".sim-status-text");
+  const timeDisplay = document.getElementById("sim-current-time");
+  const slider = document.getElementById("sim-slider");
+  const startBtn = document.getElementById("sim-start-btn");
+  const playBtn = document.getElementById("sim-play-btn");
+  const pauseBtn = document.getElementById("sim-pause-btn");
+  const resetBtn = document.getElementById("sim-reset-btn");
+  const startLabel = document.getElementById("sim-start-time");
+  const endLabel = document.getElementById("sim-end-time");
+
+  if (SimState.enabled) {
+    statusEl?.classList.add("active");
+    statusEl?.classList.toggle("playing", SimState.playing);
+    statusText.textContent = SimState.playing ? "播放中" : "已暫停";
+    
+    startBtn.textContent = "停止模擬";
+    startBtn.classList.add("primary");
+    playBtn.disabled = SimState.playing;
+    pauseBtn.disabled = !SimState.playing;
+    resetBtn.disabled = false;
+    slider.disabled = false;
+    
+    if (SimState.startTime && SimState.endTime) {
+      startLabel.textContent = formatSimTime(SimState.startTime);
+      endLabel.textContent = formatSimTime(SimState.endTime);
+    }
+  } else {
+    statusEl?.classList.remove("active", "playing");
+    statusText.textContent = "未啟動";
+    
+    startBtn.textContent = "啟動模擬";
+    startBtn.classList.remove("primary");
+    playBtn.disabled = true;
+    pauseBtn.disabled = true;
+    resetBtn.disabled = true;
+    slider.disabled = true;
+  }
+
+  // 更新時間顯示和滑桿
+  timeDisplay.textContent = formatSimTime(SimState.currentTime);
+  
+  if (SimState.startTime && SimState.endTime && SimState.currentTime) {
+    const total = SimState.endTime.getTime() - SimState.startTime.getTime();
+    const current = SimState.currentTime.getTime() - SimState.startTime.getTime();
+    const percent = total > 0 ? (current / total) * 100 : 0;
+    slider.value = Math.min(100, Math.max(0, percent));
+  }
+}
+
+async function simStart() {
+  if (SimState.enabled) {
+    // 已啟動，停止模擬
+    await fetchSimulationStop();
+    SimState.enabled = false;
+    SimState.playing = false;
+    SimState.currentTime = null;
+    // 清空事件框
+    document.getElementById("incident-list-a").innerHTML = "";
+    document.getElementById("incident-list-b").innerHTML = "";
+    updateIncidentCount("a");
+    updateIncidentCount("b");
+  } else {
+    // 啟動模擬
+    const speed = parseInt(document.getElementById("sim-speed-select").value) || 60;
+    const result = await fetchSimulationStart(speed);
+    if (result.status === "ok") {
+      SimState.enabled = true;
+      SimState.playing = false;
+      // 等 WebSocket 推播 simulation.state.v1 更新時間
+    }
+  }
+  updateSimUI();
+}
+
+async function simPlay() {
+  if (!SimState.enabled) return;
+  const result = await fetchSimulationPlay();
+  if (result.status === "ok") {
+    SimState.playing = true;
+    updateSimUI();
+  }
+}
+
+async function simPause() {
+  const result = await fetchSimulationPause();
+  if (result.status === "ok") {
+    SimState.playing = false;
+    updateSimUI();
+  }
+}
+
+async function simReset() {
+  const result = await fetchSimulationReset();
+  if (result.status === "ok") {
+    SimState.playing = false;
+    SimState.currentTime = SimState.startTime;
+    // 清空事件框
+    document.getElementById("incident-list-a").innerHTML = "";
+    document.getElementById("incident-list-b").innerHTML = "";
+    updateIncidentCount("a");
+    updateIncidentCount("b");
+    updateSimUI();
+  }
+}
+
+// 滑桿拖動跳轉時間
+function initSimSlider() {
+  const slider = document.getElementById("sim-slider");
+  if (!slider) return;
+  
+  slider.addEventListener("input", async () => {
+    if (!SimState.enabled || !SimState.startTime || !SimState.endTime) return;
+    
+    const percent = parseFloat(slider.value) / 100;
+    const total = SimState.endTime.getTime() - SimState.startTime.getTime();
+    const targetTime = new Date(SimState.startTime.getTime() + total * percent);
+    
+    // 格式化為 HH:MM
+    const timeStr = formatSimTime(targetTime);
+    await fetchSimulationSeek(timeStr);
+  });
+}
+
+// 處理 WebSocket 推播的模擬狀態
+function onSimulationState(payload) {
+  const action = payload.action;
+  
+  if (action === "started") {
+    SimState.enabled = true;
+    SimState.playing = false;
+    SimState.startTime = parseISOTime(payload.start_time);
+    SimState.endTime = parseISOTime(payload.end_time);
+    SimState.currentTime = parseISOTime(payload.current_time);
+  } else if (action === "playing") {
+    SimState.playing = true;
+  } else if (action === "paused") {
+    SimState.playing = false;
+  } else if (action === "reset") {
+    SimState.playing = false;
+    SimState.currentTime = parseISOTime(payload.current_time);
+  } else if (action === "stopped") {
+    SimState.enabled = false;
+    SimState.playing = false;
+    SimState.currentTime = null;
+  } else if (action === "ended") {
+    SimState.playing = false;
+    SimState.currentTime = parseISOTime(payload.current_time);
+  } else if (action === "seeked") {
+    SimState.currentTime = parseISOTime(payload.current_time);
+  }
+  
+  updateSimUI();
+}
+
+function onSimulationTick(payload) {
+  SimState.currentTime = parseISOTime(payload.current_time);
+  updateSimUI();
+}
+
+// 初始化時載入模擬狀態
+async function initSimulation() {
+  initSimSlider();
+  
+  try {
+    const result = await fetchSimulationState();
+    if (result.status === "ok" && result.simulation) {
+      const sim = result.simulation;
+      SimState.enabled = sim.enabled;
+      SimState.playing = sim.playing;
+      SimState.startTime = parseISOTime(sim.start_time);
+      SimState.endTime = parseISOTime(sim.end_time);
+      SimState.currentTime = parseISOTime(sim.current_time);
+      updateSimUI();
+    }
+  } catch (e) {
+    console.warn("載入模擬狀態失敗:", e);
+  }
 }
