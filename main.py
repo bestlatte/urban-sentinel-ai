@@ -150,7 +150,11 @@ async def _simulation_tick_loop() -> None:
 
 
 async def _evaluate_and_alert_at_simtime() -> None:
-    """在模擬時間做規則評估，針對每個路段獨立追蹤等級變化並彈窗。"""
+    """在模擬時間做規則評估，針對每個路段獨立追蹤等級變化並彈窗。
+    
+    當偵測到路段飽和時，同時檢查該路段是否為某個活躍事件的推薦路線，
+    若是則觸發路線重規劃並推播 routes.updated.v1。
+    """
     sim_time = _simulation_state.get("current_time")
     if not sim_time:
         return
@@ -165,6 +169,7 @@ async def _evaluate_and_alert_at_simtime() -> None:
     from src.rules import get_saturation
     
     alerts_to_send = []
+    saturated_segments = []  # 記錄本次新飽和的路段
     
     for segment in bundle.road_network:
         seg_id = segment.segment_id
@@ -199,6 +204,7 @@ async def _evaluate_and_alert_at_simtime() -> None:
                     "saturation": round(sat, 2),
                     "time": sim_time.strftime('%H:%M'),
                 })
+                saturated_segments.append(seg_id)
     
     # 發送所有路段的預警
     for alert in alerts_to_send:
@@ -214,12 +220,81 @@ async def _evaluate_and_alert_at_simtime() -> None:
             },
         })
     
+    # ★ 新增：檢查飽和路段是否為某個活躍事件的推薦路線
+    if saturated_segments:
+        await _check_and_replan_affected_routes(saturated_segments, sim_time)
+    
     # 推播 dashboard.updated.v1
     if alerts_to_send:
         await ws_manager.broadcast({
             "message_type": "dashboard.updated.v1",
             "payload": {"alerts": alerts_to_send},
         })
+
+
+async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of: datetime) -> None:
+    """檢查飽和路段是否影響到活躍事件的推薦路線，若是則重規劃並推播。
+    
+    這是「路線動態更新」的核心邏輯：當系統偵測到某路段飽和（透過現有的
+    decision.alert.v1 機制），同時檢查這個路段是不是已經被推薦為某個事件
+    的替代路線——如果是，就立即重新規劃並通知前端。
+    """
+    state = orchestrator.get_global_state()
+    saturated_set = set(saturated_segments)
+    
+    for event_id, record in list(state.active_incidents.items()):
+        if record.decision_result is None or record.decision_result.routes is None:
+            continue
+        
+        routes = record.decision_result.routes
+        affected = False
+        affected_route_type = None
+        
+        # 檢查主路線
+        if routes.primary and routes.primary.segment_id in saturated_set:
+            affected = True
+            affected_route_type = "primary"
+            logger.info(f"[路線監測] 事件 {event_id} 的主路線 {routes.primary.segment_id} 已飽和")
+        
+        # 檢查次路線
+        if routes.secondary and routes.secondary.segment_id in saturated_set:
+            affected = True
+            if affected_route_type:
+                affected_route_type = "both"
+            else:
+                affected_route_type = "secondary"
+            logger.info(f"[路線監測] 事件 {event_id} 的次路線 {routes.secondary.segment_id} 已飽和")
+        
+        if not affected:
+            continue
+        
+        # 觸發重規劃
+        result = orchestrator.check_and_replan_routes(event_id, as_of)
+        
+        if result and result.replanned:
+            # 推播 routes.updated.v1 通知前端
+            await ws_manager.broadcast({
+                "message_type": "routes.updated.v1",
+                "payload": {
+                    "event_id": event_id,
+                    "reason": "ROUTE_SATURATED",
+                    "affected_route": affected_route_type,
+                    "old_primary": result.old_primary,
+                    "new_primary": result.new_primary,
+                    "old_secondary": result.old_secondary,
+                    "new_secondary": result.new_secondary,
+                    "invalid_reasons": result.invalid_reasons,
+                    "replan_count": record.route_replan_count,
+                    "time": as_of.isoformat(),
+                },
+            })
+            
+            # 同時推播更新後的完整 decision result
+            if result.new_decision_result:
+                await ws_manager.broadcast({
+                    "message_type": "decision.completed.v1",
+                    "payload": result.new_decision_result.model_dump(mode="json"),
+                })
 
 
 async def _periodic_rule_monitor() -> None:

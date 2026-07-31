@@ -364,6 +364,10 @@ class IncidentRecord:
     """七階段跑完（PUSH）後才有值；PLAN/EXECUTE 中間階段為 None。"""
     bundle_snapshot: NormalizedDataBundle | None = None
     """OPEN 當下的 as-of bundle 快照，供 What-if 分支重算時取用（見 simulate_scenario）。"""
+    route_replan_count: int = 0
+    """該事件的路線重規劃次數。"""
+    last_route_check_at: datetime | None = None
+    """上次檢查路線有效性的時間。"""
 
 
 @dataclass
@@ -747,3 +751,127 @@ def reset() -> None:
     """測試與 demo 重播輔助：清空 `_STATE`，回到跟行程剛啟動時一樣的狀態。"""
     global _STATE
     _STATE = GlobalState()
+    # 同時清空 decision_trace 的所有紀錄
+    from src.decision_trace import reset_traces
+    reset_traces()
+
+
+# ---------------------------------------------------------------------------
+# 路線有效性監測與重規劃（背景週期性呼叫）
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RouteMonitorResult:
+    """check_and_replan_routes() 的回傳結果。"""
+    event_id: str
+    replanned: bool
+    """True 表示有執行重規劃。"""
+    old_primary: str | None
+    new_primary: str | None
+    old_secondary: str | None
+    new_secondary: str | None
+    invalid_reasons: dict[str, str]
+    """失效原因，key=segment_id。"""
+    new_decision_result: DecisionResult | None = None
+    """重規劃後的新 DecisionResult。"""
+
+
+def check_and_replan_routes(
+    event_id: str,
+    as_of: datetime,
+) -> RouteMonitorResult | None:
+    """檢查指定事件的推薦路線是否仍有效，失效則重新規劃。
+
+    此函式由背景監測迴圈呼叫，純確定性邏輯（只呼叫 routing/rules，不呼叫 LLM）。
+    回傳 None 表示該 event_id 不存在於 active_incidents 或尚無 decision_result。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return None
+
+    old_routes = record.decision_result.routes
+    if old_routes is None:
+        # 此事件本來就不需要路網規劃（例如 SOP-3/5）
+        return None
+
+    # 取得當前 bundle（非快照，用即時資料檢查飽和度）
+    bundle = GATEWAY.load_data()
+
+    # 收集目前所有封閉路段（來自 active_incidents）
+    closed_segments: set[str] = set()
+    for r in _STATE.active_incidents.values():
+        inc = r.incident
+        if inc.status in ("Closed", "Blocked"):
+            if inc.affected_segment:
+                closed_segments.add(inc.affected_segment)
+            if inc.affected_road:
+                closed_segments.add(inc.affected_road)
+
+    # 呼叫 routing.check_route_validity
+    from src.routing import check_route_validity
+    validity = check_route_validity(old_routes, bundle, as_of, closed_segments)
+
+    # 更新上次檢查時間
+    record.last_route_check_at = as_of
+
+    if not validity.needs_replan:
+        return RouteMonitorResult(
+            event_id=event_id,
+            replanned=False,
+            old_primary=old_routes.primary.segment_id if old_routes.primary else None,
+            new_primary=None,
+            old_secondary=old_routes.secondary.segment_id if old_routes.secondary else None,
+            new_secondary=None,
+            invalid_reasons={},
+        )
+
+    # 需要重規劃
+    logger.info(f"[路線監測] {event_id} 路線失效，原因: {validity.invalid_reasons}，執行重規劃")
+
+    # 重新規劃路線
+    new_route_plan = GATEWAY.plan_routes(
+        RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
+    )
+
+    # 更新 decision_result 的 routes
+    old_decision = record.decision_result
+    new_decision = DecisionResult(
+        trace_id=old_decision.trace_id,
+        triggered_by=old_decision.triggered_by,
+        level=old_decision.level,
+        incident=old_decision.incident,
+        routes=new_route_plan,
+        ete=old_decision.ete,
+        control_center_report=old_decision.control_center_report,
+        notifications=old_decision.notifications,
+        degraded=old_decision.degraded,
+        duration_ms=old_decision.duration_ms,
+        is_simulated=old_decision.is_simulated,
+    )
+    record.decision_result = new_decision
+    record.route_replan_count += 1
+
+    return RouteMonitorResult(
+        event_id=event_id,
+        replanned=True,
+        old_primary=old_routes.primary.segment_id if old_routes.primary else None,
+        new_primary=new_route_plan.primary.segment_id if new_route_plan.primary else None,
+        old_secondary=old_routes.secondary.segment_id if old_routes.secondary else None,
+        new_secondary=new_route_plan.secondary.segment_id if new_route_plan.secondary else None,
+        invalid_reasons=validity.invalid_reasons,
+        new_decision_result=new_decision,
+    )
+
+
+def monitor_all_active_routes(as_of: datetime) -> list[RouteMonitorResult]:
+    """檢查所有活躍事件的路線有效性，回傳需要更新的清單。
+
+    供 main.py 背景監測迴圈呼叫。
+    """
+    results: list[RouteMonitorResult] = []
+    for event_id in list(_STATE.active_incidents.keys()):
+        result = check_and_replan_routes(event_id, as_of)
+        if result is not None and result.replanned:
+            results.append(result)
+    return results

@@ -25,10 +25,25 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (data.traffic_samples) {
       updateChartData(data.traffic_samples);
+      // 更新飽和地圖（顯示各路段即時狀態），但不自動加入警報列表
+      if (typeof updateSaturationFromSamples === "function") {
+        updateSaturationFromSamples(data.traffic_samples);
+      }
     }
   } catch (e) {
     console.warn("初始 Dashboard 載入失敗:", e);
   }
+  
+  // 初始化飽和地圖（空白狀態）
+  setTimeout(() => {
+    if (typeof initSaturationMap === "function") {
+      initSaturationMap();
+    }
+    // 同時初始化 Dashboard 飽和列表
+    if (typeof renderDashboardSaturationList === "function") {
+      renderDashboardSaturationList();
+    }
+  }, 500);
 });
 
 // --- 頁面切換 ---
@@ -46,6 +61,12 @@ function switchPage(pageName) {
   document.querySelectorAll(".page-content").forEach(page => {
     page.hidden = page.id !== `page-${pageName}`;
   });
+  
+  // 切換到飽和地圖頁面時，重新渲染（確保資料最新）
+  if (pageName === "saturation" && typeof renderSaturationMap === "function") {
+    renderSaturationMap();
+    renderSaturationList();
+  }
 }
 
 // --- F1 KPI ---
@@ -109,6 +130,9 @@ function onDecisionCompleted(decision) {
   
   // 更新 F4 路網圖
   if (decision.routes) updateMap(decision.routes);
+  
+  // 飽和地圖更新由 decision.alert.v1 負責，不在這裡處理
+  
   // 更新 F5 報告（結構化摘要 + 全文）
   renderReportCard(decision);
   // 更新 F7 決策依據
@@ -162,9 +186,16 @@ function updateIncidentCount(level) {
 }
 
 function addIncidentToLevelBox(decision) {
-  if (!decision || !decision.level) return;
+  console.log("[addIncidentToLevelBox] 收到 decision:", decision);
+  console.log("[addIncidentToLevelBox] decision.level:", decision?.level);
+  
+  if (!decision || !decision.level) {
+    console.log("[addIncidentToLevelBox] 跳過：decision 或 level 為空");
+    return;
+  }
   
   const level = decision.level.toLowerCase();
+  console.log("[addIncidentToLevelBox] 處理等級:", level);
   const listId = `incident-list-${level}`;
   const list = document.getElementById(listId);
   if (!list) return;
@@ -208,10 +239,20 @@ function onRulesEvaluated(sensing) {
       multiCard.innerHTML = `<div class="kpi-value">${sop6Count}</div><div class="kpi-label">多語通報站點</div>`;
     }
   }
+  
+  // 更新飽和地圖資料（從 segment_snapshots 或 traffic_samples）
+  if (sensing.segment_snapshots && typeof updateSaturationFromSamples === "function") {
+    updateSaturationFromSamples(sensing.segment_snapshots);
+  } else if (sensing.traffic_samples && typeof updateSaturationFromSamples === "function") {
+    updateSaturationFromSamples(sensing.traffic_samples);
+  }
 }
 
 // --- F2 異常彈窗（堆疊式通知）---
 let alertCounter = 0;
+
+// 追蹤每個 alert 的自動關閉 timer（以便在手動關閉時清除）
+const _alertTimers = new Map();
 
 function showAlertModal(payload) {
   const stack = document.getElementById("alert-stack");
@@ -224,7 +265,10 @@ function showAlertModal(payload) {
   const alertId = `alert-${++alertCounter}`;
   
   // 判斷是「事件注入」還是「模擬器路段預警」
-  const isIncidentAlert = payload.ete_minutes !== undefined || !payload.road_name;
+  // ete_minutes 為實際數字時是事件注入，null/undefined 且有 road_name 是路段預警
+  const isIncidentAlert = (payload.ete_minutes != null) || !payload.road_name;
+  // 只有飽和路段預警才自動消失
+  const isSaturationAlert = !isIncidentAlert;
   
   let roadName, description, extraInfo;
   
@@ -239,6 +283,13 @@ function showAlertModal(payload) {
     const satPercent = payload.saturation ? `${(payload.saturation * 100).toFixed(0)}%` : "";
     description = `飽和度：${satPercent}`;
     extraInfo = "";
+    
+    // 新增到飽和警報列表並更新地圖（addSaturationAlert 會處理所有頁面的更新）
+    if (payload.segment_id && payload.saturation !== undefined) {
+      if (typeof addSaturationAlert === "function") {
+        addSaturationAlert(payload.segment_id, payload.road_name, payload.saturation, payload.timestamp);
+      }
+    }
   }
   
   const timeStr = payload.description?.match(/\[(\d+:\d+)\]/)?.[1] || "";
@@ -254,13 +305,30 @@ function showAlertModal(payload) {
     <div class="alert-item-road">${escapeHtml(roadName)}</div>
     <div class="alert-item-desc">${escapeHtml(description)}</div>
     ${extraInfo ? `<div class="alert-item-extra">${escapeHtml(extraInfo)}</div>` : ""}
+    ${isSaturationAlert ? '<div class="alert-item-progress"><div class="alert-item-progress-bar"></div></div>' : ""}
     <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')">確認</button>
   `;
   
   stack.appendChild(alertEl);
+  
+  // 只有飽和路段預警才 4 秒後自動關閉
+  if (isSaturationAlert) {
+    const autoCloseTimer = setTimeout(() => {
+      dismissAlertItem(alertId);
+    }, 4000);
+    
+    // 記錄 timer，以便手動關閉時清除
+    _alertTimers.set(alertId, autoCloseTimer);
+  }
 }
 
 function dismissAlertItem(alertId) {
+  // 清除自動關閉的 timer（如果存在）
+  if (_alertTimers.has(alertId)) {
+    clearTimeout(_alertTimers.get(alertId));
+    _alertTimers.delete(alertId);
+  }
+  
   const alertEl = document.getElementById(alertId);
   if (alertEl) {
     alertEl.style.animation = "alertSlideIn 0.2s ease-out reverse";
@@ -312,11 +380,16 @@ async function generateRandomIncident() {
 async function resetSystem() {
   if (!confirm("確定要重設系統？這會清空所有進行中的事件。")) return;
   
+  console.log("[resetSystem] 開始重設...");
+  console.log("[resetSystem] 重設前 _activityByEvent.size =", _activityByEvent.size);
+  
   try {
     const res = await fetch("/api/reset", { method: "POST" });
     const data = await res.json();
+    console.log("[resetSystem] 後端回應:", data);
+    
     if (data.status === "ok") {
-      // 清空前端狀態
+      // 清空前端狀態（使用多種方式確保徹底清空）
       _injectedEventIds.clear();
       _allDecisions.clear();
       _activityByEvent.clear();
@@ -324,6 +397,13 @@ async function resetSystem() {
       _currentEventId = null;
       _selectedActivityEventId = null;
       _lastInjectedEventId = null;
+      
+      console.log("[resetSystem] 清空後 _activityByEvent.size =", _activityByEvent.size);
+      
+      // 清空飽和地圖資料
+      if (typeof clearSaturationData === "function") {
+        clearSaturationData();
+      }
       
       // 重新載入 Dashboard
       const dashData = await fetchDashboard();
@@ -334,22 +414,44 @@ async function resetSystem() {
       // 重新初始化注入表單（恢復按鈕狀態）
       initF3InjectForm();
       
-      // 清空各區域
+      // 清空各區域 DOM
       document.getElementById("f5-report-content").innerHTML = "";
       document.getElementById("f7-activity-feed").innerHTML = "";
       document.getElementById("f7-basis-detail").innerHTML = "";
       document.getElementById("incident-list-a").innerHTML = "";
       document.getElementById("incident-list-b").innerHTML = "";
-      document.getElementById("activity-event-list").innerHTML = '<div class="activity-empty">尚無事件紀錄</div>';
+      
+      // 強制清空 Activity 事件列表 DOM
+      const activityEventList = document.getElementById("activity-event-list");
+      if (activityEventList) {
+        activityEventList.innerHTML = '<div class="activity-empty">尚無事件紀錄</div>';
+        console.log("[resetSystem] 已清空 activity-event-list DOM");
+      }
+      
+      // 清空報告 tabs
+      const reportTabs = document.getElementById("f5-report-tabs");
+      if (reportTabs) reportTabs.innerHTML = "";
+      
+      // 隱藏 Activity tabs
+      const activityTabs = document.getElementById("activity-tabs");
+      if (activityTabs) activityTabs.hidden = true;
+      
+      // 重設 Activity header
+      const activityHeader = document.getElementById("activity-main-header");
+      if (activityHeader) activityHeader.textContent = "選擇事件查看詳情";
       
       // 更新計數
       updateIncidentCount("a");
       updateIncidentCount("b");
       
+      console.log("[resetSystem] 系統重設完成，最終 _activityByEvent.size =", _activityByEvent.size);
       alert("系統已重設");
+    } else {
+      console.warn("[resetSystem] 後端回應非 ok:", data);
+      alert("重設失敗：" + (data.message || "未知錯誤"));
     }
   } catch (e) {
-    console.warn("重設失敗:", e);
+    console.error("[resetSystem] 重設失敗:", e);
     alert("重設失敗");
   }
 }
@@ -446,12 +548,47 @@ function _renderReportContent(decision) {
   }
   if (decision.routes) {
     html += `<div style="margin-top:10px;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">`;
-    if (decision.routes.primary) html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}</div>`;
-    if (decision.routes.secondary) html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}</div>`;
+    if (decision.routes.primary) {
+      const isChanged = decision.routes.primary._changedAt;
+      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+      html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}${changeNote}</div>`;
+    }
+    if (decision.routes.secondary) {
+      const isChanged = decision.routes.secondary._changedAt;
+      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+      html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}${changeNote}</div>`;
+    }
     html += `</div>`;
   }
   html += `</div>`;
   html += `</div>`;
+
+  // 路線變更歷史（如果有）
+  if (decision._routeHistory && decision._routeHistory.length > 0) {
+    html += `<div style="margin-bottom:14px;padding:10px;background:rgba(255,150,50,0.08);border:1px solid hsl(38,92%,50%,0.3);border-radius:6px">`;
+    html += `<div style="font-size:0.65rem;color:hsl(38,92%,50%);margin-bottom:8px;font-weight:600">🔄 ROUTE CHANGE HISTORY</div>`;
+    
+    decision._routeHistory.forEach((change, idx) => {
+      const time = change.time ? new Date(change.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : "";
+      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
+      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
+      
+      html += `<div style="font-size:0.72rem;${idx > 0 ? 'margin-top:8px;padding-top:8px;border-top:1px solid hsl(38,92%,50%,0.2);' : ''}">`;
+      html += `<div style="display:flex;justify-content:space-between;margin-bottom:3px">`;
+      html += `<span style="color:var(--text-secondary)">第 ${idx + 1} 次重規劃</span>`;
+      html += `<span style="color:var(--text-muted);font-size:0.65rem">${time}</span>`;
+      html += `</div>`;
+      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(change.reason)}</div>`;
+      html += `<div style="font-size:0.7rem">`;
+      html += `<span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>`;
+      html += ` → `;
+      html += `<span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>`;
+      html += `</div>`;
+      html += `</div>`;
+    });
+    
+    html += `</div>`;
+  }
 
   // 多語簡訊
   if (decision.notifications) {
@@ -725,7 +862,7 @@ function _renderActivityEventList() {
         <div class="activity-event-title">${escapeHtml(title)}</div>
         <div class="activity-event-meta">
           ${level ? `<span class="activity-event-level ${levelClass}">${level} 級</span>` : ''}
-          <span class="activity-event-time">${logCount} 筆紀錄</span>
+          <span class="activity-event-time">${logCount} 筆 log</span>
         </div>
       </div>
     `;
@@ -775,13 +912,36 @@ function _renderActivityFeed(eventId) {
   
   let html = "";
   for (const log of eventData.logs) {
-    html += `
-      <div style="font-size:0.78rem;padding:8px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-        <span style="color:var(--text-muted);min-width:48px;font-variant-numeric:tabular-nums;font-size:0.7rem">${log.time}</span>
-        <span style="color:${log.color};font-weight:500">${log.label}</span>
-        <span style="color:var(--text-muted);font-size:0.72rem">${log.detail}</span>
-      </div>
-    `;
+    if (log.isRouteChange && log.changeRecord) {
+      // 路線變更的特殊樣式
+      const change = log.changeRecord;
+      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary || "N/A";
+      const newName = _getSegmentName(change.newPrimary) || change.newPrimary || "N/A";
+      
+      html += `
+        <div style="font-size:0.78rem;padding:10px;margin:6px 0;border-radius:6px;background:rgba(255,150,50,0.1);border:1px solid hsl(38,92%,50%,0.3)">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+            <span style="color:var(--text-muted);min-width:48px;font-variant-numeric:tabular-nums;font-size:0.7rem">${log.time}</span>
+            <span style="color:hsl(38,92%,50%);font-weight:600">🔄 ${log.label}</span>
+          </div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">原因: ${escapeHtml(change.reason)}</div>
+          <div style="font-size:0.72rem;display:flex;align-items:center;gap:8px">
+            <span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>
+            <span style="color:var(--text-muted)">→</span>
+            <span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>
+          </div>
+        </div>
+      `;
+    } else {
+      // 一般 log 樣式
+      html += `
+        <div style="font-size:0.78rem;padding:8px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+          <span style="color:var(--text-muted);min-width:48px;font-variant-numeric:tabular-nums;font-size:0.7rem">${log.time}</span>
+          <span style="color:${log.color};font-weight:500">${log.label}</span>
+          <span style="color:var(--text-muted);font-size:0.72rem">${log.detail}</span>
+        </div>
+      `;
+    }
   }
   
   feed.innerHTML = html;
@@ -807,12 +967,31 @@ function renderDecisionBasis(decision) {
   if (decision.routes) {
     html += `<div style="margin-bottom:12px">`;
     html += `<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:6px">ROUTE PLAN</div>`;
+    
+    // 顯示原始路線（如果有變更過）
+    if (decision.routes._originalPrimary) {
+      html += `<div style="font-size:0.7rem;margin-bottom:8px;padding:6px 8px;background:rgba(255,100,100,0.1);border-left:3px solid hsl(0,70%,50%);border-radius:0 4px 4px 0">`;
+      html += `<div style="color:hsl(0,70%,60%);font-weight:500;margin-bottom:2px">⚠ 原始路線（因飽和已更換）</div>`;
+      html += `<div style="color:var(--text-muted)">● Primary: ${escapeHtml(decision.routes._originalPrimary.name)}</div>`;
+      if (decision.routes._originalSecondary) {
+        html += `<div style="color:var(--text-muted)">● Secondary: ${escapeHtml(decision.routes._originalSecondary.name)}</div>`;
+      }
+      html += `</div>`;
+    }
+    
+    // 顯示當前路線
     if (decision.routes.primary) {
-      html += `<div style="font-size:0.73rem;margin-bottom:4px;color:var(--text-secondary)"><span style="color:hsl(142,71%,45%)">●</span> <strong style="color:var(--text)">Primary</strong> ${escapeHtml(decision.routes.primary.name)} — ${(decision.routes.primary.saturation_score * 100).toFixed(0)}% · ${decision.routes.primary.capacity_vph} vph</div>`;
+      const isChanged = decision.routes.primary._changedAt;
+      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+      html += `<div style="font-size:0.73rem;margin-bottom:4px;color:var(--text-secondary)"><span style="color:hsl(142,71%,45%)">●</span> <strong style="color:var(--text)">Primary</strong> ${escapeHtml(decision.routes.primary.name)}${changeNote} — ${(decision.routes.primary.saturation_score * 100).toFixed(0)}% · ${decision.routes.primary.capacity_vph} vph</div>`;
     }
     if (decision.routes.secondary) {
-      html += `<div style="font-size:0.73rem;margin-bottom:4px;color:var(--text-secondary)"><span style="color:hsl(48,96%,53%)">●</span> <strong style="color:var(--text)">Secondary</strong> ${escapeHtml(decision.routes.secondary.name)} — ${(decision.routes.secondary.saturation_score * 100).toFixed(0)}% · ${decision.routes.secondary.capacity_vph} vph</div>`;
+      const isChanged = decision.routes.secondary._changedAt;
+      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+      html += `<div style="font-size:0.73rem;margin-bottom:4px;color:var(--text-secondary)"><span style="color:hsl(48,96%,53%)">●</span> <strong style="color:var(--text)">Secondary</strong> ${escapeHtml(decision.routes.secondary.name)}${changeNote} — ${(decision.routes.secondary.saturation_score * 100).toFixed(0)}% · ${decision.routes.secondary.capacity_vph} vph</div>`;
     }
+    
+    // 顯示排除路段
     if (decision.routes.excluded && decision.routes.excluded.length) {
       html += `<div style="margin-top:8px;font-size:0.65rem;color:var(--text-muted);margin-bottom:4px">EXCLUDED</div>`;
       decision.routes.excluded.forEach((e) => {
@@ -824,6 +1003,34 @@ function renderDecisionBasis(decision) {
       html += `<div style="margin-top:6px;font-size:0.65rem;color:${slaOk ? 'var(--success)' : 'var(--level-a)'}">${decision.routes.duration_ms}ms ${slaOk ? '✓' : '✗ SLA exceeded'}</div>`;
     }
     html += `</div>`;
+  }
+  
+  // 路線變更歷史
+  if (decision._routeHistory && decision._routeHistory.length > 0) {
+    html += `<div style="margin-bottom:12px">`;
+    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:6px">ROUTE CHANGE HISTORY</div>`;
+    html += `<div style="background:var(--bg-elevated);border-radius:6px;padding:8px;border:1px solid var(--border)">`;
+    
+    decision._routeHistory.forEach((change, idx) => {
+      const time = change.time ? new Date(change.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : "";
+      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
+      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
+      
+      html += `<div style="font-size:0.72rem;padding:6px 0;${idx > 0 ? 'border-top:1px solid var(--border);margin-top:6px;' : ''}">`;
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">`;
+      html += `<span style="color:hsl(38,92%,50%);font-weight:500">🔄 第 ${idx + 1} 次重規劃</span>`;
+      html += `<span style="font-size:0.65rem;color:var(--text-muted)">${time}</span>`;
+      html += `</div>`;
+      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(change.reason)}</div>`;
+      html += `<div style="font-size:0.68rem">`;
+      html += `<span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>`;
+      html += ` → `;
+      html += `<span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>`;
+      html += `</div>`;
+      html += `</div>`;
+    });
+    
+    html += `</div></div>`;
   }
 
   // ETE 公式
@@ -943,11 +1150,8 @@ async function simStart() {
     SimState.enabled = false;
     SimState.playing = false;
     SimState.currentTime = null;
-    // 清空事件框
-    document.getElementById("incident-list-a").innerHTML = "";
-    document.getElementById("incident-list-b").innerHTML = "";
-    updateIncidentCount("a");
-    updateIncidentCount("b");
+    // 注意：停止模擬時不清空事件框，事件仍然有效
+    // 只有使用者點「重設系統」才會清空
   } else {
     // 啟動模擬
     const speed = parseInt(document.getElementById("sim-speed-select").value) || 60;
@@ -983,11 +1187,9 @@ async function simReset() {
   if (result.status === "ok") {
     SimState.playing = false;
     SimState.currentTime = SimState.startTime;
-    // 清空事件框
-    document.getElementById("incident-list-a").innerHTML = "";
-    document.getElementById("incident-list-b").innerHTML = "";
-    updateIncidentCount("a");
-    updateIncidentCount("b");
+    // 注意：重置模擬時間時不清空事件框
+    // 這樣可以在同一批事件上重新跑模擬，觀察不同時間點的路線變化
+    // 如果要清空事件，請使用「重設系統」按鈕
     updateSimUI();
   }
 }
@@ -1044,6 +1246,197 @@ function onSimulationState(payload) {
 function onSimulationTick(payload) {
   SimState.currentTime = parseISOTime(payload.current_time);
   updateSimUI();
+}
+
+// ========== 路線重規劃處理 ==========
+
+function onRoutesUpdated(payload) {
+  console.log("[路線重規劃] 收到 routes.updated.v1:", payload);
+  
+  const eventId = payload.event_id;
+  if (!eventId) return;
+  
+  // 從 _allDecisions 取得該事件的 decision
+  const decision = _allDecisions.get(eventId);
+  if (!decision) {
+    console.warn("[路線重規劃] 找不到事件:", eventId);
+    return;
+  }
+  
+  // 記錄路線變更歷史（不覆蓋，保留歷史）
+  if (!decision._routeHistory) {
+    decision._routeHistory = [];
+  }
+  
+  // 保存這次變更記錄
+  const changeRecord = {
+    time: payload.time || new Date().toISOString(),
+    reason: payload.affected_route === "primary" ? "主路線飽和" : 
+            payload.affected_route === "secondary" ? "次路線飽和" : 
+            payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和",
+    oldPrimary: payload.old_primary,
+    newPrimary: payload.new_primary,
+    oldSecondary: payload.old_secondary,
+    newSecondary: payload.new_secondary,
+    invalidReasons: payload.invalid_reasons || {},
+    replanCount: payload.replan_count || 1,
+  };
+  decision._routeHistory.push(changeRecord);
+  
+  // 更新 routes 資訊（保留原始資料供比對）
+  if (decision.routes) {
+    // 標記原始路線（只在第一次變更時記錄）
+    if (!decision.routes._originalPrimary && decision.routes.primary) {
+      decision.routes._originalPrimary = {
+        segment_id: decision.routes.primary.segment_id,
+        name: decision.routes.primary.name,
+      };
+    }
+    if (!decision.routes._originalSecondary && decision.routes.secondary) {
+      decision.routes._originalSecondary = {
+        segment_id: decision.routes.secondary.segment_id,
+        name: decision.routes.secondary.name,
+      };
+    }
+    
+    // 更新主路線
+    if (payload.new_primary && decision.routes.primary) {
+      decision.routes.primary.segment_id = payload.new_primary;
+      const newPrimaryName = _getSegmentName(payload.new_primary);
+      if (newPrimaryName) decision.routes.primary.name = newPrimaryName;
+      decision.routes.primary._changedAt = changeRecord.time;
+      decision.routes.primary._changedReason = changeRecord.reason;
+    }
+    // 更新次路線
+    if (payload.new_secondary !== undefined) {
+      if (payload.new_secondary && decision.routes.secondary) {
+        decision.routes.secondary.segment_id = payload.new_secondary;
+        const newSecondaryName = _getSegmentName(payload.new_secondary);
+        if (newSecondaryName) decision.routes.secondary.name = newSecondaryName;
+        decision.routes.secondary._changedAt = changeRecord.time;
+        decision.routes.secondary._changedReason = changeRecord.reason;
+      } else if (!payload.new_secondary) {
+        // 次路線變成 null
+        decision.routes.secondary = null;
+      }
+    }
+  }
+  
+  // 重新渲染報告（如果當前顯示的是這個事件）
+  if (_currentEventId === eventId) {
+    _renderReportContent(decision);
+  }
+  _renderReportTabs();
+  
+  // 更新 F4 路網圖
+  if (decision.routes && typeof updateMap === "function") {
+    updateMap(decision.routes);
+  }
+  
+  // 更新 F7 決策依據
+  if (_selectedActivityEventId === eventId) {
+    renderDecisionBasis(decision);
+  }
+  
+  // 加入 Activity Log
+  _appendRouteChangeToActivity(eventId, changeRecord);
+  
+  // 顯示路線更新提示彈窗
+  _showRouteUpdateAlert(payload);
+}
+
+// 將路線變更加入 Activity Log
+function _appendRouteChangeToActivity(eventId, changeRecord) {
+  if (!_activityByEvent.has(eventId)) {
+    _activityByEvent.set(eventId, { decision: null, logs: [] });
+  }
+  
+  const eventData = _activityByEvent.get(eventId);
+  const time = formatTime(changeRecord.time);
+  
+  // 組成變更說明
+  let detail = changeRecord.reason;
+  if (changeRecord.oldPrimary && changeRecord.newPrimary) {
+    const oldName = _getSegmentName(changeRecord.oldPrimary);
+    const newName = _getSegmentName(changeRecord.newPrimary);
+    detail += ` | ${oldName} → ${newName}`;
+  }
+  
+  eventData.logs.push({
+    time,
+    label: "路線重規劃",
+    detail,
+    color: "hsl(38, 92%, 50%)",  // 橘色警告色
+    isRouteChange: true,
+    changeRecord,
+  });
+  
+  // 更新事件列表
+  _renderActivityEventList();
+  
+  // 如果當前選中的是這個事件，即時更新 feed
+  if (_selectedActivityEventId === eventId) {
+    _renderActivityFeed(eventId);
+  }
+}
+
+// 顯示路線更新提示（需手動確認，不自動消失）
+function _showRouteUpdateAlert(payload) {
+  const stack = document.getElementById("alert-stack");
+  if (!stack) return;
+  
+  const alertId = `alert-route-${++alertCounter}`;
+  
+  const oldPrimaryName = _getSegmentName(payload.old_primary) || payload.old_primary || "N/A";
+  const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || "N/A";
+  const reason = payload.affected_route === "primary" ? "主路線飽和" : 
+                 payload.affected_route === "secondary" ? "次路線飽和" : 
+                 payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和";
+  
+  const alertEl = document.createElement("div");
+  alertEl.className = "alert-item level-b";  // 用 B 級顏色表示警告
+  alertEl.id = alertId;
+  alertEl.innerHTML = `
+    <div class="alert-item-header">
+      <span class="alert-item-level">🔄 路線更新</span>
+      <span class="alert-item-time">${payload.time ? new Date(payload.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : ""}</span>
+    </div>
+    <div class="alert-item-road">事件 ${escapeHtml(payload.event_id || "")}</div>
+    <div class="alert-item-desc">${escapeHtml(reason)}，系統已重新規劃替代路線</div>
+    <div class="alert-item-extra" style="margin-top:6px;padding:6px;background:rgba(0,0,0,0.2);border-radius:4px;font-size:0.72rem">
+      <div style="color:hsl(0,70%,60%)">✗ 原路線: ${escapeHtml(oldPrimaryName)}</div>
+      <div style="color:hsl(142,71%,45%)">✓ 新路線: ${escapeHtml(newPrimaryName)}</div>
+    </div>
+    <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')">確認</button>
+  `;
+  
+  stack.appendChild(alertEl);
+  // 路線更新提示需手動確認，不設自動關閉
+}
+
+// 輔助函式：從 segment_id 取得路段名稱
+function _getSegmentName(segmentId) {
+  if (!segmentId) return null;
+  // 這裡可以從快取的路網資料取得名稱
+  // 目前先用簡單的對照表
+  const segmentNames = {
+    "RD_TPE_001": "忠孝東路五段",
+    "RD_TPE_002": "光復南路",
+    "RD_TPE_003": "基隆路一段",
+    "RD_TPE_004": "市民大道四段",
+    "RD_TPE_005": "仁愛路四段",
+    "RD_TPE_006": "敦化南路一段",
+    "RD_TPE_007": "松高路",
+    "RD_TPE_008": "延吉街",
+    "RD_TPE_009": "松仁路",
+    "RD_TPE_010": "永吉路",
+    "RD_TPE_011": "松山路",
+    "RD_TPE_012": "南京東路五段",
+    "RD_TPE_013": "八德路四段",
+    "RD_TPE_014": "信義路五段",
+    "RD_TPE_015": "忠孝東路四段",
+  };
+  return segmentNames[segmentId] || segmentId;
 }
 
 // 初始化時載入模擬狀態

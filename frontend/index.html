@@ -28,6 +28,10 @@
         <span class="page-nav-icon">📊</span>
         <span class="page-nav-label">Dashboard</span>
       </button>
+      <button class="page-nav-btn" data-page="saturation" onclick="switchPage('saturation')">
+        <span class="page-nav-icon">🗺️</span>
+        <span class="page-nav-label">Saturation Map</span>
+      </button>
       <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')">
         <span class="page-nav-icon">📋</span>
         <span class="page-nav-label">Activity Log</span>
@@ -136,6 +140,14 @@
           </div>
         </section>
 
+        <!-- Saturated Segments (飽和路段即時列表) -->
+        <section class="section card" id="dashboard-saturation-panel">
+          <div class="section-header">Saturated Segments</div>
+          <div class="dashboard-saturation-list" id="dashboard-saturation-list">
+            <div class="saturation-empty">目前無飽和路段</div>
+          </div>
+        </section>
+
         <!-- Advisory Report (擴大區域，原本 F7 的空間也給它) -->
         <section class="section card report-expanded" id="f5-report">
           <div class="section-header section-header-with-btn">
@@ -145,6 +157,32 @@
           <div id="f5-report-content"></div>
         </section>
       </div>
+    </div>
+  </div>
+
+  <!-- Page: Saturation Map -->
+  <div class="page-content" id="page-saturation" hidden>
+    <div class="saturation-page-layout">
+      <div class="saturation-main">
+        <div class="saturation-header">
+          <h2 class="saturation-title">Road Saturation Map</h2>
+          <div class="saturation-legend">
+            <span class="legend-item"><span class="legend-dot level-a"></span> A級 (&ge;95%)</span>
+            <span class="legend-item"><span class="legend-dot level-b"></span> B級 (85-94%)</span>
+            <span class="legend-item"><span class="legend-dot normal"></span> 正常 (&lt;85%)</span>
+          </div>
+        </div>
+        <div class="saturation-map-container" id="saturation-map"></div>
+      </div>
+      <aside class="saturation-sidebar">
+        <div class="saturation-sidebar-header">
+          飽和路段列表
+          <button class="reset-saturation-btn" onclick="resetSaturationData()" title="重置飽和資料">🔄 重置</button>
+        </div>
+        <div class="saturation-list" id="saturation-list">
+          <div class="saturation-empty">目前無飽和路段</div>
+        </div>
+      </aside>
     </div>
   </div>
 

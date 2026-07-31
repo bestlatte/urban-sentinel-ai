@@ -139,6 +139,11 @@ function handleServerMessage(msg) {
       if (typeof onSimulationTick === "function") onSimulationTick(payload);
       break;
 
+    // ===== 路線重規劃推播 =====
+    case "routes.updated.v1":
+      if (typeof onRoutesUpdated === "function") onRoutesUpdated(payload);
+      break;
+
     default:
       console.log("[WS] 未處理的 message_type:", type);
   }

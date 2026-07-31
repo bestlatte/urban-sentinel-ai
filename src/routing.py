@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from datetime import datetime
 
 from src.models import (
@@ -290,3 +291,84 @@ def count_affected_intersections(bundle: NormalizedDataBundle, affected_segment:
     if seg is None:
         return 0
     return len(seg.intersections)
+
+
+# ---------------------------------------------------------------------------
+# 路線有效性檢查（替代路線飽和監測用）
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RouteValidityResult:
+    """check_route_validity() 的回傳結果。"""
+    primary_valid: bool
+    """主路線飽和度 < 0.85 且未被封閉。"""
+    secondary_valid: bool
+    """次路線飽和度 < 0.85 且未被封閉。"""
+    primary_saturation: float | None
+    """主路線當前飽和度。"""
+    secondary_saturation: float | None
+    """次路線當前飽和度。"""
+    needs_replan: bool
+    """True 表示至少一條路線已失效，需要重新規劃。"""
+    invalid_reasons: dict[str, str]
+    """失效路線的原因說明，key=segment_id，value=原因。"""
+
+
+def check_route_validity(
+    route_plan: RoutePlan,
+    bundle: NormalizedDataBundle,
+    as_of: datetime,
+    closed_segments: set[str] | None = None,
+) -> RouteValidityResult:
+    """檢查已推薦的主/次路線是否仍然有效。
+
+    有效條件（任一不符即視為失效）：
+    1. 飽和度 < 0.85
+    2. 路段未被封閉（不在 closed_segments 中）
+
+    此為純確定性計算，不涉及 LLM，適合背景監測每 10 秒呼叫。
+    """
+    if closed_segments is None:
+        closed_segments = set()
+
+    invalid_reasons: dict[str, str] = {}
+
+    # 檢查主路線
+    primary_valid = True
+    primary_sat: float | None = None
+    if route_plan.primary:
+        seg_id = route_plan.primary.segment_id
+        primary_sat, _ = _get_saturation_snapshot(bundle, seg_id, as_of)
+
+        if seg_id in closed_segments:
+            primary_valid = False
+            invalid_reasons[seg_id] = "CLOSED_BY_NEW_INCIDENT"
+        elif primary_sat is not None and primary_sat >= 0.85:
+            primary_valid = False
+            invalid_reasons[seg_id] = f"SATURATED_{primary_sat:.2f}"
+
+    # 檢查次路線
+    secondary_valid = True
+    secondary_sat: float | None = None
+    if route_plan.secondary:
+        seg_id = route_plan.secondary.segment_id
+        secondary_sat, _ = _get_saturation_snapshot(bundle, seg_id, as_of)
+
+        if seg_id in closed_segments:
+            secondary_valid = False
+            invalid_reasons[seg_id] = "CLOSED_BY_NEW_INCIDENT"
+        elif secondary_sat is not None and secondary_sat >= 0.85:
+            secondary_valid = False
+            invalid_reasons[seg_id] = f"SATURATED_{secondary_sat:.2f}"
+
+    # 判定是否需要重新規劃：主路線失效則一定要重規劃；僅次路線失效也建議重規劃
+    needs_replan = not primary_valid or not secondary_valid
+
+    return RouteValidityResult(
+        primary_valid=primary_valid,
+        secondary_valid=secondary_valid,
+        primary_saturation=primary_sat,
+        secondary_saturation=secondary_sat,
+        needs_replan=needs_replan,
+        invalid_reasons=invalid_reasons,
+    )
