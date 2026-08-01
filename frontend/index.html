@@ -50,6 +50,32 @@
     </div>
   </header>
 
+  <!-- Side Navigation -->
+  <aside class="side-nav-shell" aria-label="主要頁面導覽">
+    <button class="side-nav-toggle" type="button" onclick="toggleSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
+      <span>‹</span>
+    </button>
+    <div class="side-nav-title">Workspace</div>
+    <nav class="page-nav" id="page-nav">
+      <button class="page-nav-btn active" data-page="dashboard" onclick="switchPage('dashboard')" title="Dashboard">
+        <span class="page-nav-icon">📊</span>
+        <span class="page-nav-label">Dashboard</span>
+      </button>
+      <button class="page-nav-btn" data-page="saturation" onclick="switchPage('saturation')" title="Saturation Map">
+        <span class="page-nav-icon">🗺️</span>
+        <span class="page-nav-label">Saturation Map</span>
+      </button>
+      <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')" title="Activity Log">
+        <span class="page-nav-icon">📋</span>
+        <span class="page-nav-label">Activity Log</span>
+      </button>
+    </nav>
+    <div class="side-nav-footer">
+      <span class="status-dot"></span>
+      <span>System online</span>
+    </div>
+  </aside>
+
   <!-- Page: Dashboard (default) -->
   <div class="page-content" id="page-dashboard">
     <!-- Main Layout -->
@@ -245,9 +271,9 @@
   <script src="/frontend/js/api.js"></script>
   <script src="/frontend/js/ws.js"></script>
   <script src="/frontend/vendor/chart.umd.js"></script>
-  <script src="/frontend/js/charts.js"></script>
+  <script src="/frontend/js/charts.js?v=incident-neighbors-3"></script>
   <script src="/frontend/js/map.js"></script>
   <script src="/frontend/js/chat-app.js"></script>
-  <script src="/frontend/js/app.js"></script>
+  <script src="/frontend/js/app.js?v=traffic-event-bars-2"></script>
 </body>
 </html>

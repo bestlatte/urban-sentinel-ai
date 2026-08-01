@@ -14,6 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initF3InjectForm();
   initHeaderClock();
   initExpandReportBtn();
+  initSideNav();
   initPageNav();
   initSimulation();
 
@@ -49,6 +50,40 @@ document.addEventListener("DOMContentLoaded", async () => {
 // --- 頁面切換 ---
 function initPageNav() {
   // 頁面切換已在 HTML onclick 處理，這裡可加額外初始化邏輯
+}
+
+function setSideNavCollapsed(collapsed) {
+  const sidebar = document.querySelector(".side-nav-shell");
+  const toggle = document.querySelector(".side-nav-toggle");
+  if (!sidebar || !toggle) return;
+
+  sidebar.classList.toggle("collapsed", collapsed);
+  document.body.classList.toggle("side-nav-collapsed", collapsed);
+  toggle.setAttribute("aria-expanded", String(!collapsed));
+  toggle.setAttribute("aria-label", collapsed ? "展開側邊欄" : "收縮側邊欄");
+  toggle.title = collapsed ? "展開側邊欄" : "收縮側邊欄";
+}
+
+function initSideNav() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem("citynexus-side-nav-collapsed") === "true";
+  } catch (e) {
+    console.warn("無法讀取側邊欄偏好:", e);
+  }
+  setSideNavCollapsed(collapsed);
+}
+
+function toggleSideNav() {
+  const sidebar = document.querySelector(".side-nav-shell");
+  if (!sidebar) return;
+  const collapsed = !sidebar.classList.contains("collapsed");
+  setSideNavCollapsed(collapsed);
+  try {
+    localStorage.setItem("citynexus-side-nav-collapsed", String(collapsed));
+  } catch (e) {
+    console.warn("無法儲存側邊欄偏好:", e);
+  }
 }
 
 function switchPage(pageName) {
@@ -129,6 +164,10 @@ function onDecisionCompleted(decision) {
   // 用 trace_id 去重（REST 回應 + WS 推播會各呼叫一次，避免重複計數）
   if (decision.trace_id && _processedTraceIds.has(decision.trace_id)) return;
   if (decision.trace_id) _processedTraceIds.add(decision.trace_id);
+
+  if (typeof updateTrafficChartForIncident === "function") {
+    updateTrafficChartForIncident(decision);
+  }
   
   // 記錄到 Activity Log
   _recordDecisionForActivity(decision);
@@ -247,7 +286,11 @@ function selectIncidentFromList(eventId) {
   
   // 切換 report tab
   if (_allDecisions.has(eventId)) {
+    const decision = _allDecisions.get(eventId);
     switchReportTab(eventId);
+    if (typeof updateTrafficChartForIncident === "function") {
+      updateTrafficChartForIncident(decision);
+    }
   }
   
   // 切換 Activity 面板
@@ -844,6 +887,9 @@ function switchReportTab(eventId) {
   if (!_allDecisions.has(eventId)) return;
   _currentEventId = eventId;
   const decision = _allDecisions.get(eventId);
+  if (typeof updateTrafficChartForIncident === "function") {
+    updateTrafficChartForIncident(decision);
+  }
   _renderReportTabs();
   _renderReportContent(decision);
   
