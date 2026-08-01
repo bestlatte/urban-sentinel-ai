@@ -36,6 +36,33 @@
 .sop-badge.sop-6 { border-color: hsl(160, 50%, 25%); color: hsl(160, 70%, 60%); }
 .sop-badge.sop-7 { border-color: hsl(270, 50%, 30%); color: hsl(270, 70%, 70%); }
 
+/* 參考條文區塊（RAG 語意檢索）——跟規則引擎的數值命中是兩個不同來源，
+ * 標題必須說清楚，否則會出現「標題掛 SOP-2 但命中條款裡沒有 SOP-2」
+ * 這種看起來自相矛盾的畫面。見 chat-render.js 的說明。 */
+.sop-ref-block { margin-bottom: 8px; }
+
+.sop-ref-label {
+  font-size: 0.6rem;
+  color: var(--text-muted, #71717a);
+  margin-bottom: 4px;
+  letter-spacing: 0.02em;
+}
+
+.sop-ref-label span {
+  margin-left: 6px;
+  opacity: 0.75;
+}
+
+/* 同時也數值命中的條文標一個點，讓兩套來源的交集一眼可見 */
+.sop-badge.sop-also-hit { border-style: solid; border-width: 1px; font-weight: 600; }
+
+.sop-hit-mark {
+  font-size: 0.5rem;
+  margin-right: 4px;
+  vertical-align: middle;
+  opacity: 0.9;
+}
+
 .ete-badge {
   display: inline-flex;
   align-items: center;

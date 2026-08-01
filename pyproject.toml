@@ -8,12 +8,20 @@ dependencies = [
     "uvicorn[standard]",
     "pydantic>=2",
     "networkx",
-    "pandas",
     "boto3",
     "strands-agents",
+    "bedrock-agentcore",
 ]
 # 固定技術棧來源：.kiro/steering/00-tech-stack.md §1。
 # 明確禁止清單見同文件 §2——不得加入 React 建置工具鏈相關套件（不適用本專案，前端純原生JS）。
+#
+# [2026-08-01 Phase 0.5 依賴盤點]
+# - 移除 pandas：00-tech-stack.md §1 標示為「可選」，且全專案零 import（實測 grep 無命中）。
+# - 保留 networkx：00-tech-stack.md §1 明訂「路網演算 | NetworkX | 不得自行手寫圖演算法取代」，
+#   屬強制技術棧。但實測 `src/routing.py` 目前並未 import networkx（自行實作拓樸走訪），
+#   兩者不一致——這是既有的規格落差，已回報待決策，此處先依 steering 保留宣告，不擅自移除。
+# - 新增 bedrock-agentcore：AgentCore Runtime entrypoint（BedrockAgentCoreApp）所需，
+#   對應 加分項_AgentCore_Runtime部署.md。AgentCore CLI 本身走 npm（@aws/agentcore），不在此列。
 
 [project.optional-dependencies]
 dev = [

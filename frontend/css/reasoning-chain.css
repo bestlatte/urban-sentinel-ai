@@ -1,0 +1,509 @@
+/* What-if 推理鏈 — 見 frontend/js/reasoning-chain.js 的設計說明。
+ *
+ * 版面前提：這是指揮中心側邊對話框，寬度 340~520px（chat-variables.css 的
+ * --chat-panel-min/max）。所有元件都必須在 340px 下不破版，所以一律用單欄
+ * 縱向堆疊，不做多欄格線。
+ */
+
+.reasoning-chain {
+  margin-top: 8px;
+  font-size: 0.75rem;
+}
+
+/* ---- 階段外框：左側縱線把四個階段串成一條鏈 ---- */
+
+.rc-stage {
+  position: relative;
+  padding: 0 0 10px 14px;
+  border-left: 2px solid var(--border, #1f1f23);
+}
+
+.rc-stage:last-child { border-left-color: transparent; padding-bottom: 0; }
+
+/* 節點圓點 */
+.rc-stage::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--bg-card, #0c0c0f);
+  border: 2px solid var(--border-hover, #2a2a2f);
+}
+
+.rc-stage-assumptions::before { border-color: var(--level-normal, hsl(186, 78%, 42%)); }
+.rc-stage-rules::before { border-color: var(--chat-warning, hsl(25, 95%, 53%)); }
+.rc-stage-routes::before { border-color: var(--route-primary, hsl(142, 71%, 45%)); }
+.rc-stage-ete::before { border-color: var(--route-secondary, hsl(48, 96%, 53%)); }
+.rc-stage-diff::before { border-color: var(--chat-danger, hsl(0, 84%, 60%)); }
+
+.rc-stage-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary, #a1a1aa);
+  margin-bottom: 6px;
+}
+
+.rc-stage-body { display: flex; flex-direction: column; gap: 6px; }
+
+/* ---- 假設條件 ---- */
+
+.rc-assumption {
+  background: var(--bg-elevated, #131316);
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.rc-assumption-target {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #a1a1aa);
+  margin-bottom: 3px;
+}
+
+.rc-field {
+  font-size: 0.65rem;
+  color: var(--text-muted, #71717a);
+  margin-left: 4px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.rc-assumption-values {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-before { color: var(--text-muted, #71717a); text-decoration: line-through; }
+.rc-arrow { color: var(--text-muted, #71717a); font-size: 0.65rem; }
+.rc-after { font-weight: 700; font-size: 0.9rem; }
+
+.rc-delta { font-size: 0.68rem; padding: 1px 5px; border-radius: 4px; }
+.rc-delta.rc-up { color: hsl(0, 84%, 70%); background: hsla(0, 84%, 60%, 0.12); }
+.rc-delta.rc-down { color: hsl(142, 71%, 60%); background: hsla(142, 71%, 45%, 0.12); }
+
+/* ---- 命中條款 ---- */
+
+.rc-rule {
+  background: var(--bg-elevated, #131316);
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+/* 主因條款加左側粗邊，掃一眼就知道哪條是主因 */
+.rc-rule-primary { border-left: 3px solid var(--chat-warning, hsl(25, 95%, 53%)); }
+
+.rc-rule-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.rc-clause {
+  font-weight: 700;
+  font-size: 0.7rem;
+  color: var(--chat-warning, hsl(25, 95%, 53%));
+}
+
+.rc-target { color: var(--text-secondary, #a1a1aa); font-size: 0.72rem; }
+
+.rc-badge-primary {
+  font-size: 0.6rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: hsla(25, 95%, 53%, 0.15);
+  color: var(--chat-warning, hsl(25, 95%, 53%));
+}
+
+/* 命中條款的關係分類：主因／事故路段連帶／全市背景 */
+.rc-rel {
+  margin-left: auto;
+  font-size: 0.58rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* 使用者自己假設的對象最顯眼——那是他問這個問題的原因 */
+.rc-rel-assumed {
+  background: hsla(262, 83%, 65%, 0.2);
+  color: hsl(262, 83%, 75%);
+  font-weight: 600;
+}
+.rc-rel-primary { background: hsla(25, 95%, 53%, 0.18); color: var(--chat-warning, hsl(25, 95%, 53%)); }
+.rc-rel-related { background: hsla(186, 78%, 42%, 0.16); color: var(--level-normal, hsl(186, 78%, 42%)); }
+/* 背景條款刻意做得最不顯眼——它是情勢資訊，不是待辦事項 */
+.rc-rel-bg { background: hsla(0, 0%, 50%, 0.14); color: var(--text-muted, #71717a); }
+
+.rc-composition {
+  font-size: 0.68rem;
+  color: var(--text-secondary, #a1a1aa);
+  padding: 6px 8px;
+  margin-bottom: 2px;
+  border-radius: 5px;
+  background: var(--bg-elevated, #131316);
+  line-height: 1.6;
+}
+
+.rc-composition-main { font-weight: 600; }
+
+/* 這一段沒有內容時的說明。留白會被讀成「系統壞了」，
+ * 明說「算過了，沒有觸發」才是正確的訊息。 */
+.rc-empty {
+  font-size: 0.68rem;
+  color: var(--text-muted, #71717a);
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--bg-elevated, #131316);
+}
+
+/* 評估時刻：使用者要能一眼確認系統算的是不是他在看的那個時間 */
+.rc-composition-time {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: hsla(186, 78%, 42%, 0.14);
+  color: var(--level-normal, hsl(186, 78%, 42%));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「你假設的東西沒觸發任何規則」——用紫色跟 rc-rel-assumed 呼應，
+ * 讓使用者知道這句話講的是他剛剛動的那個對象 */
+.rc-composition-nohit {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.62rem;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: hsla(262, 83%, 65%, 0.12);
+  color: hsl(262, 60%, 78%);
+  line-height: 1.5;
+}
+
+.rc-composition-note {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.6rem;
+  color: var(--text-muted, #71717a);
+}
+
+.rc-rule-meta {
+  font-size: 0.68rem;
+  color: var(--text-muted, #71717a);
+  margin: 3px 0 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rc-rule-meta strong { color: var(--chat-primary, hsl(0, 0%, 95%)); margin: 0 4px; }
+.rc-threshold { margin-left: 4px; }
+
+/* 比例條：實際值長度 vs 固定位置的門檻線 */
+.rc-bar {
+  position: relative;
+  height: 4px;
+  background: var(--border, #1f1f23);
+  border-radius: 2px;
+  overflow: visible;
+}
+
+.rc-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--level-normal, hsl(186, 78%, 42%));
+  transition: width 0.3s ease;
+}
+
+/* 超過門檻改成警示色——這是「為什麼會觸發」最直接的視覺答案 */
+.rc-bar-fill.over { background: var(--chat-warning, hsl(25, 95%, 53%)); }
+
+.rc-bar-threshold {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 8px;
+  background: var(--chat-danger, hsl(0, 84%, 60%));
+  border-radius: 1px;
+}
+
+/* 其餘命中條款：就地展開，不指向別的地方 */
+.rc-more-details > summary {
+  cursor: pointer;
+  font-size: 0.68rem;
+  color: var(--text-muted, #71717a);
+  padding: 3px 0;
+  user-select: none;
+}
+
+.rc-more-details > summary:hover { color: var(--text-secondary, #a1a1aa); }
+
+.rc-more-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  /* 極端情況下可能十幾條，給它自己的捲動範圍不要把對話框撐長 */
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.rc-level {
+  font-size: 0.62rem;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.rc-level-A { background: hsla(0, 84%, 60%, 0.18); color: var(--level-a, hsl(0, 84%, 60%)); }
+.rc-level-B { background: hsla(25, 95%, 53%, 0.18); color: var(--level-b, hsl(25, 95%, 53%)); }
+.rc-level-normal { background: hsla(186, 78%, 42%, 0.15); color: var(--level-normal, hsl(186, 78%, 42%)); }
+
+/* ---- 路線規劃 ---- */
+
+.rc-route {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: var(--bg-elevated, #131316);
+  border-left: 3px solid var(--border-hover, #2a2a2f);
+}
+
+.rc-route-primary { border-left-color: var(--route-primary, hsl(142, 71%, 45%)); }
+.rc-route-secondary { border-left-color: var(--route-secondary, hsl(48, 96%, 53%)); }
+.rc-route-excluded { border-left-color: var(--route-closed, hsl(0, 84%, 60%)); opacity: 0.72; }
+
+.rc-route-role {
+  font-size: 0.62rem;
+  color: var(--text-muted, #71717a);
+  flex-shrink: 0;
+  width: 24px;
+}
+
+.rc-route-name { font-size: 0.74rem; flex: 1; }
+
+.rc-route-detail {
+  font-size: 0.65rem;
+  color: var(--text-muted, #71717a);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.rc-no-route {
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: hsla(0, 84%, 60%, 0.12);
+  color: var(--chat-danger, hsl(0, 84%, 60%));
+  font-size: 0.72rem;
+}
+
+/* ---- 恢復時間 ---- */
+
+.rc-ete {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-elevated, #131316);
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.rc-ete-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--route-secondary, hsl(48, 96%, 53%));
+}
+
+.rc-ete-value span {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--text-muted, #71717a);
+  margin-left: 3px;
+}
+
+.rc-ete-side { font-size: 0.68rem; color: var(--text-secondary, #a1a1aa); }
+
+.rc-formula {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.62rem;
+  color: var(--text-muted, #71717a);
+  margin-top: 2px;
+  /* 公式可能比面板寬，讓它自己捲而不是把版面撐開 */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+/* ---- 與正式決策的差異 ---- */
+
+.rc-diff {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: hsla(0, 84%, 60%, 0.07);
+  font-size: 0.7rem;
+}
+
+.rc-diff-field {
+  color: var(--text-muted, #71717a);
+  flex-shrink: 0;
+}
+
+/* ---- 建議動作 ---- */
+
+.rc-actions { margin-top: 8px; }
+
+.rc-actions-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary, #a1a1aa);
+  margin-bottom: 4px;
+}
+
+.rc-action {
+  position: relative;
+  padding: 3px 0 3px 14px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #a1a1aa);
+}
+
+.rc-action::before {
+  content: "▸";
+  position: absolute;
+  left: 2px;
+  color: var(--route-primary, hsl(142, 71%, 45%));
+}
+
+/* ---- 摺疊區（情境建議書、SOP 原文） ---- */
+
+.rc-report,
+.rc-sop-detail {
+  margin-top: 8px;
+  font-size: 0.72rem;
+  border-top: 1px solid var(--border, #1f1f23);
+  padding-top: 6px;
+}
+
+.rc-report > summary,
+.rc-sop-detail > summary {
+  cursor: pointer;
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 0.7rem;
+  user-select: none;
+}
+
+.rc-report > summary:hover,
+.rc-sop-detail > summary:hover { color: var(--chat-primary, hsl(0, 0%, 95%)); }
+
+.rc-report .md,
+.rc-sop-detail p {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--text-muted, #71717a);
+}
+
+/* ---- 決策軌跡時間軸 ----
+ * 跟推理鏈刻意用不同的視覺語言：推理鏈是「這個假設怎麼算的」（彩色、比例條、
+ * 強調數值變化），軌跡是「正式決策實際跑了什麼」（單色、等寬、像稽核紀錄）。
+ * 兩者同時出現在一則回覆裡時，使用者一眼要分得出哪個是推演、哪個是事實。 */
+
+.decision-trace {
+  margin-top: 8px;
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 6px;
+  background: var(--bg-card, #0c0c0f);
+}
+
+.decision-trace > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #a1a1aa);
+  user-select: none;
+}
+
+.decision-trace > summary:hover { color: var(--chat-primary, hsl(0, 0%, 95%)); }
+
+.tr-list {
+  padding: 4px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 軌跡可能很長，給它自己的捲動範圍而不是把對話框撐長 */
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tr-step {
+  padding-left: 10px;
+  border-left: 2px solid var(--border-hover, #2a2a2f);
+}
+
+.tr-step-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 0.7rem;
+}
+
+.tr-seq {
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  border-radius: 3px;
+  background: var(--bg-elevated, #131316);
+  color: var(--text-muted, #71717a);
+  font-size: 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.tr-actor { color: var(--chat-primary, hsl(0, 0%, 95%)); font-weight: 600; }
+.tr-action { color: var(--text-secondary, #a1a1aa); }
+
+.tr-tool,
+.tr-sop,
+.tr-ms {
+  font-size: 0.58rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+.tr-tool { background: hsla(186, 78%, 42%, 0.14); color: var(--level-normal, hsl(186, 78%, 42%)); }
+.tr-sop { background: hsla(25, 95%, 53%, 0.14); color: var(--chat-warning, hsl(25, 95%, 53%)); }
+.tr-ms { color: var(--text-muted, #71717a); font-variant-numeric: tabular-nums; }
+
+.tr-step-body {
+  margin-top: 3px;
+  font-size: 0.66rem;
+  color: var(--text-muted, #71717a);
+  line-height: 1.6;
+}
+
+.tr-output {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.62rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.tr-output strong { color: var(--text-secondary, #a1a1aa); }
+.tr-excluded { color: hsl(0, 60%, 62%); }
+.tr-finding { color: var(--chat-warning, hsl(25, 95%, 53%)); }
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-bar-fill { transition: none; }
+}

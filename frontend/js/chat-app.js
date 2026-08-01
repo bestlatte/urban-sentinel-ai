@@ -74,7 +74,14 @@ async function sendMessage(text) {
 
   try {
     // 走 REST，不走 WS
-    const data = await fetchWhatIf(text, ChatState.sessionId, ChatState.currentCorrelationId);
+    // 第四個參數是使用者正在看的決策週期。漏掉它就是「報告書與 chatbot
+    // 給出不同建議」的根因——見 ChatState.currentTraceId 的說明。
+    const data = await fetchWhatIf(
+      text,
+      ChatState.sessionId,
+      ChatState.currentCorrelationId,
+      ChatState.currentTraceId
+    );
 
     removeLoading();
 

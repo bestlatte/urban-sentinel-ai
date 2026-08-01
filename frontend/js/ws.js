@@ -85,6 +85,9 @@ function handleServerMessage(msg) {
 
     case "decision.task_update.v1":
       if (typeof appendActivityEntry === "function") appendActivityEntry("task_update", payload);
+      // 帶 eta_seconds 的階段（建議書生成、決策說明）另外畫全域進度條，
+      // 否則那 15~20 秒畫面上只有活動面板多一行字，太容易被當成當機。
+      if (typeof onTaskUpdateProgress === "function") onTaskUpdateProgress(payload);
       break;
 
     case "decision.completed.v1":

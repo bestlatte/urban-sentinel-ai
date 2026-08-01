@@ -111,12 +111,18 @@ def test_use_bedrock_false_uses_local_fallback_with_correct_field_name(monkeypat
 
 
 def test_bedrock_kb_exception_falls_back_to_local_not_crash(monkeypatch):
-    """回歸測試：Bedrock呼叫失敗要真的try/except退化，不是讓例外往上拋。"""
-    monkeypatch.setenv("USE_BEDROCK", "true")
+    """回歸測試：Bedrock呼叫失敗要真的try/except退化，不是讓例外往上拋。
 
-    # Mock bedrock_kb 讓它拋例外
+    [2026-08-01] 原本這裡還多一行 `monkeypatch.setattr(retriever_mod, "USE_BEDROCK", True)`
+    ——因為當時 `USE_BEDROCK` 是 import-time 模組常數，光設環境變數 patch 不到。
+    現在改成呼叫時才讀（`llm.bedrock_enabled()`），`setenv` 就夠了，那一行已移除。
+    這正是那次修正想達到的效果：測試不必為了繞過設計缺陷而多做一步。
+    """
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    # KB ID 要有值才會走雲端路徑（留空時直接走本機，不會呼叫 query_bedrock_kb）
+    monkeypatch.setenv("BEDROCK_KNOWLEDGE_BASE_ID", "TESTKB1234")
+
     import src.bedrock_service.sop_retriever as retriever_mod
-    monkeypatch.setattr(retriever_mod, "USE_BEDROCK", True)
 
     def mock_bedrock_kb(question):
         raise RuntimeError("模擬 Bedrock 連線失敗")
@@ -127,3 +133,40 @@ def test_bedrock_kb_exception_falls_back_to_local_not_crash(monkeypatch):
     result = retriever_mod.query_sop("車禍路障塌陷封閉")
     assert result.retrieval_source == "local_fallback"
     assert len(result.sections) >= 1  # 本機比對應有結果
+
+
+def test_blank_knowledge_base_id_skips_bedrock_entirely(monkeypatch):
+    """`BEDROCK_KNOWLEDGE_BASE_ID` 留空時不得送出注定失敗的 KB 請求。
+
+    留空照送會讓 botocore 在參數驗證階段拋
+    `Invalid length for parameter knowledgeBaseId, value: 0`，
+    雖然有被接住降級，但每次查詢都白繞一圈並在日誌噴 stack trace。
+    """
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    monkeypatch.setenv("BEDROCK_KNOWLEDGE_BASE_ID", "")
+
+    import src.bedrock_service.sop_retriever as retriever_mod
+
+    called = []
+
+    def mock_bedrock_kb(question):
+        called.append(question)
+        raise AssertionError("KB ID 留空時不該呼叫 query_bedrock_kb")
+
+    monkeypatch.setattr(retriever_mod, "query_bedrock_kb", mock_bedrock_kb)
+
+    result = retriever_mod.query_sop("車禍路障塌陷封閉")
+    assert called == []
+    assert result.retrieval_source == "local_fallback"
+    assert len(result.sections) >= 1
+
+
+def test_natural_language_question_retrieves_sop(monkeypatch):
+    """回歸測試：自然語言問句要查得到 SOP，不能回空。
+
+    原本的 `score = hit_count / len(keywords)` 讓「路面塌陷事故的 SOP 條款怎麼
+    規定？」只得 0.1 分被濾掉，`query_sop` 回空，W1 的條款依據鏈整條是空的。
+    見 `local_fallback.FULL_MATCH_HITS` 的說明。
+    """
+    results = query_local("請問路面塌陷事故的 SOP 條款怎麼規定？")
+    assert [r.section_number for r in results] == [2]

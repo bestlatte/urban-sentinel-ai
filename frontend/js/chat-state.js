@@ -12,6 +12,21 @@ const ChatState = {
   hasFirstMessage: false,
   currentCorrelationId: null,
   sessionId: null,
+  currentTraceId: null,
+  /**
+   * 使用者目前正在看的決策週期。
+   *
+   * [2026-08-01] 這個欄位**之前根本不存在**，而 `api.js::fetchWhatIf()` 的第四個
+   * 參數就是 `currentTraceId`——`chat-app.js` 只傳了三個，所以它永遠是 undefined，
+   * 後端收到的 `current_trace_id` 永遠是 null。
+   *
+   * 後果是整條連鎖：chatbot 拿不到 incident → 評估時刻掉到「資料集最新時刻」
+   * （23:30）→ 用一個跟畫面差 80 分鐘的時間掃全市 → 命中十幾條全是背景 →
+   * 路線與 ETE 在那個時刻算出完全不同的結果。
+   *
+   * 使用者的原話是「注入事件觸發報告書和 chatbot 問同個問題，給出的建議不同」。
+   * 那不是 LLM 不穩定，是兩邊算的根本是不同時刻的世界。
+   */
 };
 
 function initChatState() {

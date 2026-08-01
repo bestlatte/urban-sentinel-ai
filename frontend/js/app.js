@@ -78,7 +78,7 @@ function renderKpis(kpis) {
     { key: "current_level", label: "最高應變等級", value: kpis.current_level || "正常" },
     { key: "average_saturation", label: "平均飽和度", value: kpis.average_saturation != null ? (kpis.average_saturation * 100).toFixed(1) + "%" : "N/A" },
     { key: "multilingual_alert_count", label: "多語通報站點", value: kpis.multilingual_alert_count ?? 0 },
-    { key: "system_mode", label: "系統模式", value: kpis.system_mode === "live" ? "Live" : "Degraded" },
+    { key: "system_mode", label: "系統模式", value: _systemModeLabel(kpis.system_mode) },
   ];
 
   cards.forEach((card, i) => {
@@ -121,6 +121,14 @@ function onDashboardUpdated(payload) {
 
 function onDecisionCompleted(decision) {
   if (!decision) return;
+  // 讓 chatbot 知道使用者正在看哪個決策週期。
+  //
+  // 必須放在去重檢查**之前**：REST 回應與 WS 推播會各觸發一次，第二次會被
+  // 去重擋掉，若寫在後面就有一半機率設不到值。
+  if (decision.trace_id && typeof ChatState !== "undefined") {
+    ChatState.currentTraceId = decision.trace_id;
+  }
+
   // 用 trace_id 去重（REST 回應 + WS 推播會各呼叫一次，避免重複計數）
   if (decision.trace_id && _processedTraceIds.has(decision.trace_id)) return;
   if (decision.trace_id) _processedTraceIds.add(decision.trace_id);
@@ -602,10 +610,19 @@ function _renderReportContent(decision) {
     html += `</div>`;
   }
 
+  // 後續風險推演（圖形化）
+  //
+  // [2026-08-01] 放在建議書全文**之前**：它回答的是「照這個方案做，接下來
+  // 會出什麼問題」，是指揮官看完結論後最該接著知道的事。放在全文之後會被
+  // 幾百字的敘述擋住，等於沒有。
+  if (typeof renderRiskTimeline === "function" && decision.projected_risks) {
+    html += renderRiskTimeline(decision.projected_risks);
+  }
+
   // 建議書全文
   if (decision.control_center_report) {
-    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:6px">FULL REPORT</div>`;
-    html += `<div style="font-size:0.75rem;line-height:1.7;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(decision.control_center_report)}</div>`;
+    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin:14px 0 6px">FULL REPORT</div>`;
+    html += `<div class="md" style="font-size:0.75rem;line-height:1.7;color:var(--text-secondary)">${renderMarkdown(decision.control_center_report)}</div>`;
   }
 
   // 元資訊
@@ -725,7 +742,7 @@ function openReportModal() {
   if (d.control_center_report) {
     html += `<div class="report-section">`;
     html += `<div class="report-section-label">交控建議書全文</div>`;
-    html += `<div class="report-full-text">${escapeHtml(d.control_center_report)}</div>`;
+    html += `<div class="report-full-text md">${renderMarkdown(d.control_center_report)}</div>`;
     html += `</div>`;
   }
 
@@ -801,8 +818,13 @@ function appendActivityEntry(type, payload) {
       "ete_done": ["ETE 計算", "完成", "hsl(48,96%,53%)"],
       "report_started": ["報告生成", "生成中...", "hsl(270,50%,60%)"],
       "report_done": ["報告生成", "完成", "hsl(270,50%,60%)"],
+      "explain_started": ["決策說明", "生成中...", "hsl(200,60%,55%)"],
+      "explain_done": ["決策說明", "完成", "hsl(200,60%,55%)"],
     };
-    const [lbl, det, clr] = statusMap[payload.status] || ["任務", payload.status, "hsl(0,0%,50%)"];
+    // 後端未知狀態時用它送來的 `label`（人話），而不是原始狀態碼。
+    // 後端新增階段時畫面至少顯示得出中文，不會冒出 `foo_started` 這種東西。
+    const fallback = [payload.label || "任務", payload.status, "hsl(0,0%,50%)"];
+    const [lbl, det, clr] = statusMap[payload.status] || fallback;
     label = lbl;
     detail = det;
     color = clr;
@@ -1046,9 +1068,47 @@ function renderDecisionBasis(decision) {
   panel.innerHTML = html;
 }
 
+/**
+ * 系統模式 KPI 的顯示文字。
+ *
+ * [2026-08-01] 原本是 `system_mode === "live" ? "Live" : "Degraded"`，而後端的
+ * system_mode 是從 USE_BEDROCK 旗標推的——憑證失效時這張卡片會顯示 **Live**，
+ * 但建議書早就退成模板版。後端已改讀實際探測結果，並多了 "unknown" 一態。
+ */
+function _systemModeLabel(mode) {
+  if (mode === "live") return "Live";
+  if (mode === "degraded") return "Degraded";
+  return "檢查中";
+}
+
+/**
+ * 系統狀態橫幅。
+ *
+ * [2026-08-01] 這個函式從專案初期就存在、`ws.js` 也接好了 `chat.system_status.v1`
+ * 的分派，但**後端從來沒有廣播過那則訊息**——整個功能等於不存在。後端補上廣播後
+ * 送來的是 `bedrock_status.get_status()`，形狀跟原本假設的 `{level}` 不同，
+ * 所以這裡一併改寫。
+ *
+ * 兩種 payload 都收：帶 `mode` 的是系統狀態，帶 `level` 的是應變等級（保留舊行為，
+ * 若日後有人真的送那種形狀過來不會壞掉）。
+ */
 function updateStatusBanner(payload) {
   const banner = document.getElementById("status-banner");
-  if (!banner) return;
+  if (!banner || !payload) return;
+
+  if (payload.mode) {
+    // Live 不顯示橫幅——一切正常時不該佔用畫面。只有出問題才需要說話。
+    if (payload.mode === "live") {
+      banner.className = "chat-status-banner";
+      banner.textContent = "";
+      return;
+    }
+    const cls = payload.mode === "degraded" ? "level-a" : "level-b";
+    banner.className = `chat-status-banner visible ${cls}`;
+    banner.textContent = payload.message || "系統狀態異常";
+    return;
+  }
+
   if (payload.level) {
     banner.className = `chat-status-banner visible level-${payload.level.toLowerCase()}`;
     banner.textContent = `目前應變等級：${payload.level}`;

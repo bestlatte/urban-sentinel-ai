@@ -168,6 +168,37 @@ def test_generate_report_returns_tuple(bundle: NormalizedDataBundle):
     assert len(result) == 2
 
 
+def test_llm_failure_falls_back_to_template_not_none(bundle: NormalizedDataBundle, monkeypatch):
+    """回歸測試：`USE_BEDROCK=true` 但 Bedrock 打不通時，必須退回模板而非回 None。
+
+    這是 Demo 現場最可能發生的失敗（臨時憑證過期）。實測修正前的行為：決策週期
+    3.5 秒跑完、黃金值全對，但 `degraded=['C1_FAILED','C4_FAILED']`、
+    **建議書 0 字、簡訊全空** ——而同一份資料在 `USE_BEDROCK=false` 之下明明能
+    產出完整的模板版建議書與四語簡訊。
+
+    旗標說的是「允不允許用 Bedrock」，不是「Bedrock 現在通不通」，兩者分歧時
+    不該連堪用的版本都不給。
+    """
+    import src.reporting as reporting_mod
+
+    monkeypatch.setenv("USE_BEDROCK", "true")
+
+    def _expired(*args, **kwargs):
+        raise RuntimeError("The security token included in the request is invalid")
+
+    monkeypatch.setattr(reporting_mod, "_invoke_bedrock_converse", _expired)
+
+    incident, sensing, route_plan, ete = _make_acc001_inputs(bundle)
+    report_text, notification = reporting_mod.generate_report(
+        incident, sensing, route_plan, ete, advisory=None, bundle=bundle
+    )
+
+    assert report_text, "LLM 失敗時建議書不得為空——應退回 _generate_c1_c3_fallback"
+    assert "TPE_2026_ACC_001" in report_text
+    assert notification is not None, "LLM 失敗時簡訊不得為 None——應退回 _generate_c4_fallback"
+    assert notification.zh
+
+
 def test_generate_report_notification_is_single_object_not_list(bundle: NormalizedDataBundle):
     """回歸測試：第二回傳值是單一 Notification 物件，不是 list。"""
     from src.reporting import generate_report

@@ -1,0 +1,124 @@
+/* 嚴重度並列比較表 — 設計說明見 frontend/js/severity-options.js
+ *
+ * 做成表格而不是卡片列：指揮官要的是「三行之間比大小」，表格的欄位對齊
+ * 讓 88/68/48 這種數字可以直接掃視比較，卡片列會把它們拆散到不同位置。
+ */
+
+.sev-block {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 8px;
+  background: var(--bg-card, #0c0c0f);
+}
+
+.sev-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.sev-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--chat-primary, hsl(0, 0%, 95%));
+}
+
+.sev-asof {
+  font-size: 0.62rem;
+  color: var(--level-normal, hsl(186, 78%, 42%));
+  font-variant-numeric: tabular-nums;
+}
+
+.sev-note {
+  font-size: 0.66rem;
+  color: var(--text-muted, #71717a);
+  margin-bottom: 8px;
+}
+
+/* ---- 比較表 ---- */
+
+.sev-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 窄面板時可以橫向捲，不讓整頁被撐開 */
+  overflow-x: auto;
+}
+
+.sev-row {
+  display: grid;
+  grid-template-columns: 4.5rem 4.5rem minmax(6rem, 1fr) minmax(7rem, 1.2fr);
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-elevated, #131316);
+  min-width: 24rem;
+}
+
+.sev-row-head {
+  background: transparent;
+  font-size: 0.6rem;
+  color: var(--text-muted, #71717a);
+  padding-bottom: 2px;
+}
+
+.sev-c-level {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.sev-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-muted, #71717a);
+}
+
+.sev-row-head .sev-dot { display: none; }
+
+/* 由重到輕：紅 → 橘 → 黃 */
+.sev-critical .sev-dot { background: var(--level-a, hsl(0, 84%, 60%)); }
+.sev-high     .sev-dot { background: var(--level-b, hsl(25, 95%, 53%)); }
+.sev-medium   .sev-dot { background: hsl(48, 90%, 55%); }
+
+.sev-critical { border-left: 2px solid var(--level-a, hsl(0, 84%, 60%)); }
+.sev-high     { border-left: 2px solid var(--level-b, hsl(25, 95%, 53%)); }
+.sev-medium   { border-left: 2px solid hsl(48, 90%, 55%); }
+
+.sev-c-ete { font-weight: 700; }
+
+.sev-c-route,
+.sev-c-risk {
+  color: var(--text-secondary, #a1a1aa);
+  font-size: 0.66rem;
+}
+
+.sev-warn {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.58rem;
+  background: hsla(0, 84%, 60%, 0.16);
+  color: hsl(0, 84%, 72%);
+}
+
+/* 講明下面的推演是用哪一種算的——不講的話使用者會誤以為那是唯一答案 */
+.sev-active {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border, #1f1f23);
+  font-size: 0.63rem;
+  line-height: 1.6;
+  color: var(--text-muted, #71717a);
+}

@@ -10,6 +10,7 @@ C1~C4 一律由 A2 編排觸發，本模組不得被繞過直接呼叫（01-modu
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from pathlib import Path
 
@@ -23,6 +24,8 @@ from src.models import (
     SensingResult,
 )
 from src.rules import get_saturation
+
+logger = logging.getLogger(__name__)
 
 _BASE_CLEARANCE = {
     "Critical": 60,
@@ -88,14 +91,25 @@ def _load_prompt(filename: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _build_facts_block(
+def build_facts_block(
     incident: Incident,
     sensing: SensingResult,
     route_plan: RoutePlan | None,
     ete: EteEstimate,
     bundle: NormalizedDataBundle | None = None,
 ) -> str:
-    """把確定性事實組成文字塊注入 prompt，LLM 只能引用不能改寫。"""
+    """把確定性事實組成文字塊注入 prompt，LLM 只能引用不能改寫。
+
+    [2026-08-01 改為公開 API]
+    原本是 `_build_facts_block`，只有 C1-C3 建議書在用。現在 W1 What-if Agent
+    也要引用同一份事實（見 `agent/whatif_agent.py` 的「方案A：共用事實管線」），
+    所以改成公開。
+
+    **這是 SPEC-00 鐵律①「LLM 只表達、不改寫」的實際落點**：建議書、What-if
+    對話、What-if 情境建議書三處的數字必然一致，因為全部來自這一個函式。
+    如果哪天有人想再寫一份「類似的」事實組裝，那就是在製造第二個真相來源——
+    要加欄位請加在這裡。
+    """
     lines = [
         f"事件ID: {incident.event_id}",
         f"位置: {incident.location}",
@@ -256,31 +270,74 @@ def generate_report(
 
     [2026-07-28架構複查新增] `bundle` 參數：SOP-5 的警力人數需要
     `routing.count_affected_intersections()` 算受影響路口數，見 `_generate_c1_c3_fallback`。
-    """
-    import os
 
-    use_bedrock = os.getenv("USE_BEDROCK", "true").lower() == "true"
+    [2026-08-01 修正：LLM 失敗時退回模板，不再直接放棄]
+    ------------------------------------------------------
+    原本的分支是「`USE_BEDROCK` 旗標為 true → 走 LLM，例外 → 回 None」。問題在於
+    旗標說的是「**允不允許**用 Bedrock」，不是「Bedrock **現在通不通**」。兩者一旦
+    分歧（憑證過期、模型未開通、斷網），建議書與簡訊就整個變成 None。
+
+    實測憑證過期的情況：決策週期 3.5 秒跑完、黃金值全對，但
+    `degraded=['C1_FAILED','C4_FAILED']`、**建議書 0 字、簡訊全空**——
+    而同一份資料在 `USE_BEDROCK=false` 之下明明能產出完整的模板版建議書與四語簡訊。
+    等於「因為想要更好的版本，結果連堪用的版本都不給了」。
+
+    改成兩段式：先試 LLM，失敗就退模板。只有連模板都組不出來（那是資料層的問題，
+    不是 LLM 的問題）才回 None。這讓憑證過期從「Demo 崩潰」降級成「文字比較樸素」。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.llm import bedrock_enabled
+
+    use_bedrock = bedrock_enabled()
     multilingual = sensing.multilingual_required
 
-    # C1-C3 建議書
-    report_text: str | None = None
-    try:
-        if use_bedrock:
-            report_text = _generate_with_llm(incident, sensing, route_plan, ete, bundle)
-        else:
-            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle)
-    except Exception:
-        report_text = None
+    # [2026-08-01 並行化] C1-C3 與 C4 之間沒有任何資料依賴——兩者都只讀已經算好的
+    # incident/sensing/route_plan/ete。原本卻是序列執行，實測 20.8s + 8.6s = 29.4s
+    # 白白等成一條線。改並行後上限是兩者的最大值，不是總和。
+    #
+    # 用執行緒而不是 asyncio：boto3 是同步 client，而 generate_report() 的呼叫端
+    # （orchestrator 的 EXECUTE 階段）目前是同步函式，改成 async 會一路往上傳染。
+    # 兩個 I/O-bound 呼叫用執行緒完全足夠，GIL 在等待網路時會釋放。
+    if use_bedrock:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            report_future = pool.submit(
+                _generate_with_llm, incident, sensing, route_plan, ete, bundle
+            )
+            notif_future = pool.submit(
+                _generate_notification_with_llm, incident, route_plan, ete, multilingual
+            )
 
-    # C4 簡訊
-    notification: Notification | None = None
-    try:
-        if use_bedrock:
-            notification = _generate_notification_with_llm(incident, route_plan, ete, multilingual)
-        else:
-            notification = _generate_c4_fallback(incident, route_plan, ete, multilingual)
-    except Exception:
+            try:
+                report_text: str | None = report_future.result()
+            except Exception as e:
+                logger.warning(f"C1-C3 LLM 生成失敗，退回固定模板: {e}")
+                report_text = None
+
+            try:
+                notification: Notification | None = notif_future.result()
+            except Exception as e:
+                logger.warning(f"C4 LLM 生成失敗，退回固定模板: {e}")
+                notification = None
+    else:
+        report_text = None
         notification = None
+
+    # 模板保底。LLM 沒開、或開了但打不通，都走到這裡——旗標說的是「允不允許用
+    # Bedrock」，不是「Bedrock 現在通不通」，兩者分歧時不該連堪用的版本都不給。
+    if report_text is None:
+        try:
+            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle)
+        except Exception:
+            logger.exception("C1-C3 模板組裝也失敗")
+            report_text = None
+
+    if notification is None:
+        try:
+            notification = _generate_c4_fallback(incident, route_plan, ete, multilingual)
+        except Exception:
+            logger.exception("C4 模板組裝也失敗")
+            notification = None
 
     return report_text, notification
 
@@ -288,27 +345,30 @@ def generate_report(
 def _invoke_bedrock_converse(system_prompt: str, user_message: str) -> str:
     """呼叫 Bedrock Converse API（Claude）生成文字。
 
-    這是 C1-C4 共用的底層 LLM 呼叫函式。
+    這是 C1-C4 與 M4B 解釋鏈共用的底層 LLM 呼叫函式。
     失敗時拋例外，由上層 try/except 處理降級。
+
+    [2026-08-01] 實作搬到 `src/llm.py`，這裡保留為薄轉接層。保留原因有二：
+    `decision_trace._invoke_m4b_llm()` 以這個名字 import，且 `tests/test_a2_agent.py`
+    以 monkeypatch 攔這個名字讓整個決策週期離線可測——這是既有的測試接縫，
+    不值得為了「少一層」而破壞它。
+
+    搬家換到的實質好處是逾時：原本這裡的 boto3 client 沒有任何 timeout 設定，
+    網路不穩時 C1-C3 生成會無限期卡住整個決策週期。
     """
-    import os
-    import boto3
+    from src.llm import get_report_model_id, invoke_converse
 
-    region = os.environ.get("AWS_REGION", "us-west-2")
-    model_id = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
-
-    client = boto3.client("bedrock-runtime", region_name=region)
-
-    response = client.converse(
-        modelId=model_id,
-        messages=[
-            {"role": "user", "content": [{"text": user_message}]},
-        ],
-        system=[{"text": system_prompt}],
-        inferenceConfig={"maxTokens": 2000, "temperature": 0.3},
+    # [2026-08-01] max_tokens 2000 → 800，並改用 Haiku。
+    # 輸出長度直接決定延遲：實測 1508 字要 20.8 秒。2000 tokens 的上限等於放任
+    # 模型寫論文，而指揮中心要的是一頁就能看完的建議書。prompt 端也加了字數規定
+    # （prompts/report.txt），這裡是硬上限——prompt 沒被遵守時仍有一道閘。
+    return invoke_converse(
+        system_prompt,
+        user_message,
+        max_tokens=800,
+        temperature=0.3,
+        model_id=get_report_model_id(),
     )
-
-    return response["output"]["message"]["content"][0]["text"]
 
 
 def _generate_with_llm(
@@ -319,9 +379,25 @@ def _generate_with_llm(
     bundle: NormalizedDataBundle,
 ) -> str:
     """使用 Bedrock LLM 生成 C1-C3 建議書。"""
+    from src.risk_projection import build_risk_block, project_risks
+
     system_prompt = _load_prompt("report.txt")
-    facts_block = _build_facts_block(incident, sensing, route_plan, ete, bundle)
-    user_message = f"請根據以下事實資料生成交控建議書（含號誌調整與聯動建議）：\n\n{facts_block}"
+    facts_block = build_facts_block(incident, sensing, route_plan, ete, bundle)
+
+    # [2026-08-01] 二階效應推演一併注入。跟事實區塊同樣是「LLM 只能引用、
+    # 不能改寫」——風險的時間點、數值、對策全部由 `risk_projection` 算好。
+    # 推演失敗只是少一段內容，不能讓整份建議書生不出來。
+    try:
+        projection = project_risks(incident, route_plan, sensing, bundle, ete.minutes)
+        risk_block = build_risk_block(projection)
+    except Exception:  # noqa: BLE001
+        logger.exception("風險推演失敗，建議書不含後續風險段落")
+        risk_block = ""
+
+    user_message = (
+        f"請根據以下事實資料生成交控建議書（含號誌調整、聯動建議與後續風險）：\n\n"
+        f"{facts_block}\n\n{risk_block}"
+    )
 
     return _invoke_bedrock_converse(system_prompt, user_message)
 
@@ -351,6 +427,10 @@ def _generate_notification_with_llm(
     else:
         user_message = f"請根據以下事實生成中文交通簡訊通知（不超過100字）：\n\n{facts}"
 
+    # 走 `_invoke_bedrock_converse` 而不是直接呼叫 `llm.invoke_converse`：
+    # 那個名字是既有的**測試接縫**（tests/test_a2_agent.py 以 monkeypatch 攔它
+    # 讓整個決策週期離線可測）。繞過去的話測試會真的打網路——實測套件從 2.3 秒
+    # 變成 29 秒，而且變成依賴憑證與連線。
     text = _invoke_bedrock_converse(system_prompt, user_message)
 
     # 嘗試解析 JSON（多語時）

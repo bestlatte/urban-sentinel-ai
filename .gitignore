@@ -1,5 +1,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# 憑證。用萬用字元而不是只寫 .env——備份檔（.env.bak）、環境別檔（.env.local）
+# 裡面一樣有金鑰，只擋 .env 一個名字擋不住。.env.example 是唯一要進版控的。
 .env
+.env.*
+!.env.example
 .DS_Store

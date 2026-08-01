@@ -68,6 +68,80 @@ def test_acc_001_golden_route_selection(bundle: NormalizedDataBundle):
     assert result.no_feasible_route is False
 
 
+# -- SOP-2 §2a：替代路段飽和時仍須指派 --
+def test_all_candidates_saturated_still_assigns_a_route(bundle: NormalizedDataBundle):
+    """所有相鄰候選都飽和時，仍要指派最佳者並啟動長綠燈時制。
+
+    SOP-2 §2a 原文：「若主替代路段已飽和 (Saturation_Score >= 0.85)，**仍指派
+    該路線**並啟動『長綠燈時制』…」條文沒有「只有一條候選時才這樣做」的但書。
+
+    [2026-08-01 回歸測試] 原本的實作寫 `if len(saturated_candidates) == 1`，
+    造成一個說不通的結果：
+
+        1 條候選飽和 → 指派該路線 + 長綠燈時制
+        2 條候選飽和 → 什麼都不給，回報「無可行替代路線」
+
+    選項變多反而結果變差。實測觸發情境：23:30 假設光復南路坍塌，相鄰候選
+    市民大道四段(0.98) 與 仁愛路四段(0.92) 都飽和，系統回「周邊路網全數飽和
+    無法承接」。但事故現場的車流不會因為系統說沒路就消失——指揮官需要的是
+    「最不糟的那條 + 配套措施」。
+    """
+    from datetime import timedelta
+
+    from src.models import Incident, IncidentSeverity, RouteRequest
+
+    req = _make_acc001(bundle)
+
+    # 把所有路段的飽和度都推到 0.85 以上，製造「候選全飽和」
+    saturated = bundle.model_copy(deep=True)
+    for sample in saturated.traffic:
+        if sample.saturation_score is not None and sample.saturation_score < 0.9:
+            sample.saturation_score = 0.9
+
+    result = plan_route(
+        RouteRequest(incident=req.incident, bundle=saturated, as_of=req.as_of)
+    )
+
+    assert result.no_feasible_route is False, "候選全飽和不該直接放棄"
+    assert result.primary is not None, "SOP-2 §2a 要求仍指派主替代路線"
+    assert result.primary.saturation_score >= 0.85, "本測試前提是候選都已飽和"
+
+    codes = [f.finding_code for f in result.findings]
+    assert "SATURATED_BUT_RETAINED" in codes, (
+        "必須留下 finding，讓指揮官知道這條路本來就滿了"
+    )
+
+    finding = next(f for f in result.findings if f.finding_code == "SATURATED_BUT_RETAINED")
+    assert result.primary.segment_id in finding.segment_ids
+    assert "長綠燈" in str(finding.evidence)
+
+
+def test_saturated_retention_still_respects_hard_filters(bundle: NormalizedDataBundle):
+    """保留飽和候選**不得**放寬容量與相鄰性這兩道硬篩選。
+
+    SOP-2 只說飽和可以容忍，沒說容量不足或不相鄰的路也能拿來用。
+    延吉街（容量 600 < 1000）不管多空都不該被指派。
+    """
+    req = _make_acc001(bundle)
+    saturated = bundle.model_copy(deep=True)
+    for sample in saturated.traffic:
+        if sample.saturation_score is not None and sample.saturation_score < 0.9:
+            sample.saturation_score = 0.9
+
+    from src.models import RouteRequest
+
+    result = plan_route(
+        RouteRequest(incident=req.incident, bundle=saturated, as_of=req.as_of)
+    )
+
+    assigned = {c.segment_id for c in (result.primary, result.secondary) if c is not None}
+    excluded_ids = {c.segment_id: c.reason_code for c in result.excluded}
+
+    assert "RD_TPE_008" not in assigned, "容量不足的路段被指派了"
+    assert excluded_ids.get("RD_TPE_008") == "CAPACITY_INSUFFICIENT"
+    assert "RD_TPE_006" not in assigned, "不相鄰的路段被指派了"
+
+
 # -- AC-C07: 只使用事件時間以前的快照 --
 def test_as_of_snapshot_constraint(bundle: NormalizedDataBundle):
     """所有候選的 snapshot_at 都必須 <= as_of。"""

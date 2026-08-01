@@ -1,0 +1,243 @@
+/* 後續風險推演時間軸 — 見 frontend/js/risk-timeline.js 的設計說明。
+ *
+ * 視覺語彙刻意跟推理鏈（reasoning-chain.css）與決策軌跡分開：
+ *   推理鏈  = 這個假設怎麼算的（彩色比例條，橫向比較）
+ *   決策軌跡 = 正式決策實際跑了什麼（單色等寬，像稽核紀錄）
+ *   風險推演 = 接下來會怎樣（時間軸，強調「還有多久」）
+ * 三者可能同時出現在畫面上，一眼要分得出哪個是推演、哪個是事實、哪個是預測。
+ */
+
+.risk-projection {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: 8px;
+  background: var(--bg-card, #0c0c0f);
+}
+
+.risk-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.risk-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--chat-primary, hsl(0, 0%, 95%));
+}
+
+.risk-horizon {
+  font-size: 0.65rem;
+  color: var(--text-muted, #71717a);
+}
+
+/* 升級判斷：最重要的一句話，放最上面且最顯眼 */
+.risk-escalation {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 3px solid var(--level-a, hsl(0, 84%, 60%));
+  background: hsla(0, 84%, 60%, 0.1);
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
+
+.risk-escalation strong {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--level-a, hsl(0, 84%, 60%));
+}
+
+.risk-none {
+  font-size: 0.72rem;
+  color: var(--text-muted, #71717a);
+  padding: 4px 0;
+}
+
+/* ---- 時間軸 ---- */
+
+.risk-axis {
+  position: relative;
+  height: 34px;
+  margin: 4px 6px 14px;
+}
+
+.risk-axis-line {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  /* 由安全到危險的漸層：越往右（越晚）壓力越大 */
+  background: linear-gradient(
+    90deg,
+    var(--route-primary, hsl(142, 71%, 45%)) 0%,
+    var(--level-b, hsl(25, 95%, 53%)) 55%,
+    var(--level-a, hsl(0, 84%, 60%)) 100%
+  );
+  opacity: 0.35;
+}
+
+.risk-marker {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.risk-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-card, #0c0c0f);
+  background: var(--text-muted, #71717a);
+}
+
+.risk-now .risk-dot { background: var(--route-primary, hsl(142, 71%, 45%)); }
+.risk-b .risk-dot { background: var(--level-b, hsl(25, 95%, 53%)); }
+.risk-a .risk-dot { background: var(--level-a, hsl(0, 84%, 60%)); }
+
+.risk-marker-label {
+  font-size: 0.58rem;
+  color: var(--text-muted, #71717a);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- 逐項卡片 ---- */
+
+.risk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.risk-item {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-elevated, #131316);
+  border-left: 3px solid var(--border-hover, #2a2a2f);
+}
+
+.risk-item.risk-b { border-left-color: var(--level-b, hsl(25, 95%, 53%)); }
+.risk-item.risk-a { border-left-color: var(--level-a, hsl(0, 84%, 60%)); }
+
+.risk-item-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.risk-when {
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-in {
+  font-size: 0.62rem;
+  color: var(--text-muted, #71717a);
+}
+
+.risk-level-chip {
+  margin-left: auto;
+  font-size: 0.6rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.risk-b .risk-level-chip {
+  background: hsla(25, 95%, 53%, 0.18);
+  color: var(--level-b, hsl(25, 95%, 53%));
+}
+
+.risk-a .risk-level-chip {
+  background: hsla(0, 84%, 60%, 0.18);
+  color: var(--level-a, hsl(0, 84%, 60%));
+}
+
+.risk-what {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #a1a1aa);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 4px;
+}
+
+.risk-from { color: var(--text-muted, #71717a); }
+.risk-arrow { color: var(--text-muted, #71717a); font-size: 0.6rem; margin: 0 2px; }
+.risk-to { font-weight: 700; color: var(--chat-primary, hsl(0, 0%, 95%)); }
+
+.risk-delta {
+  font-size: 0.62rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: hsla(0, 84%, 60%, 0.12);
+  color: hsl(0, 84%, 70%);
+  margin-left: 3px;
+}
+
+.risk-threshold {
+  font-size: 0.62rem;
+  color: var(--text-muted, #71717a);
+  margin-left: 4px;
+}
+
+.risk-cause {
+  font-size: 0.66rem;
+  color: var(--text-muted, #71717a);
+  line-height: 1.5;
+  margin-bottom: 4px;
+}
+
+/* 對策是這張卡片存在的目的——用綠色標出「可以做的事」 */
+.risk-mitigation {
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--text-secondary, #a1a1aa);
+  padding-top: 4px;
+  border-top: 1px dashed var(--border, #1f1f23);
+}
+
+.risk-clause {
+  display: inline-block;
+  font-size: 0.58rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-right: 4px;
+  background: hsla(142, 71%, 45%, 0.15);
+  color: var(--route-primary, hsl(142, 71%, 45%));
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* ---- 推演假設 ---- */
+
+.risk-assumptions {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border, #1f1f23);
+}
+
+.risk-assumptions > summary {
+  cursor: pointer;
+  font-size: 0.65rem;
+  color: var(--text-muted, #71717a);
+  user-select: none;
+}
+
+.risk-assumptions > summary:hover { color: var(--text-secondary, #a1a1aa); }
+
+.risk-assumptions ul {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 0.64rem;
+  line-height: 1.7;
+  color: var(--text-muted, #71717a);
+}

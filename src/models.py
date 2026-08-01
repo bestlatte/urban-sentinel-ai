@@ -8,11 +8,49 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, Field
+
+SCHEMA_VERSION = "1.0"
+"""Envelope 的 schema_version 固定值，唯一來源 `contracts/module_exchange_contract.json` 第 3 行。"""
+
+TZ_TAIPEI = timezone(timedelta(hours=8))
+"""00-tech-stack.md §7：時間一律 ISO 8601 + Asia/Taipei（+08:00），禁止無時區字串。"""
+
+DEFAULT_BEDROCK_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+"""`BEDROCK_MODEL_ID` 未設定時的預設模型（W1／A2／C1-C4／M4B 共用）。
+
+[2026-08-01] 原本三處各自寫死 `anthropic.claude-3-5-sonnet-20241022-v2:0`，
+該版本在 us-west-2 已 end-of-life，實測回
+`ResourceNotFoundException: This model version has reached the end of its life`。
+改用 inference profile 形式的 Sonnet 4.5（AgentCore CLI 骨架的預設值亦為此），
+並收斂成單一常數，避免下次模型下架時又要三個檔案各改一次。
+
+環境變數 `BEDROCK_MODEL_ID` 仍優先於本值（00-tech-stack.md §5）。
+"""
+
+DEFAULT_REPORT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+"""C1-C4（交控建議書／多語簡訊）專用的預設模型。
+
+[2026-08-01 實測後分流] 決策週期 40 秒裡有 29.4 秒是這兩個生成：
+C1-C3 建議書 20.8s（1508 字）、C4 四語簡訊 8.6s。而決定性模組（讀資料、
+規則、路網、ETE）加起來是 **3 毫秒**——使用者感受到的「卡」百分之百來自 LLM。
+
+C1-C4 的任務性質是**唯讀轉換**：所有數字、路段、條款編號都已經由 Python 算好
+寫進 facts block，LLM 只負責把既有事實寫成人話（SPEC-00 鐵律①）。這種任務用
+Haiku 就夠，換來約一倍的速度。
+
+需要理解與規劃的兩個地方**維持 Sonnet**，不套用本值：
+  - A2 規劃器（要從自然語言事件推工具序列）
+  - W1 What-if 對話（要理解使用者的自然語言假設並選對工具與欄位）
+
+環境變數 `BEDROCK_REPORT_MODEL_ID` 優先；若只設了 `BEDROCK_MODEL_ID` 而沒設
+這一個，仍以本值為準——想讓建議書也跑 Sonnet 請顯式設定 `BEDROCK_REPORT_MODEL_ID`。
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +123,44 @@ class IncidentSeverity(str, Enum):
 
 
 TrafficLevel = Literal["A", "B", "normal"]
+
+
+class ToolName(str, Enum):
+    """A2 規劃器可選的工具白名單，唯一來源 SPEC-00 §3.2（十二值，不得新增）。
+
+    SPEC-O2 §3.2 護欄①：A2 LLM 產出的 ToolPlan 若出現本列舉以外的工具名，
+    整份計畫作廢並降級為靜態分派鏈。
+    """
+
+    RAG_SEARCH = "RAG_SEARCH"                    # K3 SOP 檢索
+    GRAPH_BUILD = "GRAPH_BUILD"                  # R1
+    UPSTREAM_JUDGE = "UPSTREAM_JUDGE"            # R2
+    CANDIDATE_FILTER = "CANDIDATE_FILTER"        # R3
+    ROUTE_SELECT = "ROUTE_SELECT"                # R4
+    CALC_ETE = "CALC_ETE"                        # A3
+    COUNT_INTERSECTIONS = "COUNT_INTERSECTIONS"  # SOP-5 警力估算；歸屬 routing.py
+    CAPACITY_CHECK = "CAPACITY_CHECK"            # X2（延伸）
+    FORECAST_MODEL = "FORECAST_MODEL"            # X1/X2（延伸）
+    CASCADE_ANALYSIS = "CASCADE_ANALYSIS"        # X2（延伸）
+    FORMAT_REPORT = "FORMAT_REPORT"              # C1
+    TRANSLATE = "TRANSLATE"                      # C4
+
+
+R_CHAIN_TOOLS: frozenset[ToolName] = frozenset(
+    {
+        ToolName.GRAPH_BUILD,
+        ToolName.UPSTREAM_JUDGE,
+        ToolName.CANDIDATE_FILTER,
+        ToolName.ROUTE_SELECT,
+    }
+)
+"""R1-R4 路網工具鏈。SPEC-O2 §3.2 護欄②「§2 類事件必含 R 鏈與 CALC_ETE」的判定集合。
+
+R5（排除理由記錄）不在 ToolName 列舉內——SPEC-00 §3.2 只列到 ROUTE_SELECT，
+R5 的產出是 RoutePlan.excluded 欄位，隨 ROUTE_SELECT 一併回傳，不是獨立可規劃的工具。
+"""
+
+
 ReasonCode = Literal[
     "CLOSED",
     "CAPACITY_INSUFFICIENT",
@@ -392,6 +468,38 @@ class TraceAnswer(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# A2 編排規劃（SPEC-O2 §3 折衷制的 LLM 規劃器輸出）
+# ---------------------------------------------------------------------------
+
+
+class ToolPlanStep(BaseModel):
+    """ToolPlan 的單一步驟。
+
+    `args_hint` 是 LLM 給的參數「提示」而非權威值——SPEC-00 鐵律①「LLM 只表達、
+    不改寫」：實際傳給決定性模組的參數一律由 orchestrator 從 IncidentEvent／
+    NormalizedDataBundle 取得，不採信 LLM 生成的 event_id／路段代碼／數值。
+    args_hint 只用於留痕（讓 F7 面板顯示「A2 當時想怎麼呼叫」）與除錯。
+    """
+
+    tool: ToolName
+    args_hint: dict = Field(default_factory=dict)
+
+
+class ToolPlan(BaseModel):
+    """A2 LLM 規劃器的輸出契約（SPEC-O2 §3.1）。
+
+    規劃器「不執行工具、不產生數值結果」，只回傳工具序列；執行由 orchestrator
+    的 EXECUTE 階段依 GATEWAY 呼叫決定性模組完成。
+    """
+
+    steps: list[ToolPlanStep] = Field(default_factory=list)
+
+    def tool_names(self) -> list[ToolName]:
+        """依序回傳工具名，供護欄②的必要步驟檢查與 record_step 留痕使用。"""
+        return [s.tool for s in self.steps]
+
+
+# ---------------------------------------------------------------------------
 # 決策結果與 Dashboard（M5 組裝）
 # ---------------------------------------------------------------------------
 
@@ -412,6 +520,17 @@ class DecisionResult(BaseModel):
     duration_ms: int
     is_simulated: bool
     """依本次決策實際引用的資料來源計算，不得寫死 True（引用真實 provided 資料時應為 False）。"""
+    projected_risks: dict | None = None
+    """二階效應推演（`risk_projection.projection_to_dict()` 的輸出）。
+
+    [2026-08-01 新增] 建議書原本只回答「現在該做什麼」，沒有回答「這麼做之後
+    會怎樣」。實測 ACC_001：系統建議改道市民大道四段（當下飽和度 0.78），
+    而該路段在 20 分鐘內就會達 A 級——指揮官照著做，然後在 22:30 面對一個
+    本來可以預先處置的新事件。
+
+    這個欄位裝的是「接下來 60 分鐘會出什麼問題、什麼時候、依 SOP 該怎麼辦」，
+    全部由 `src/risk_projection.py` 確定性算出，LLM 只負責寫成通順的段落。
+    """
 
 
 class KpiSummary(BaseModel):
@@ -424,7 +543,8 @@ class KpiSummary(BaseModel):
         2. current_level         — 全路網目前最高應變等級（多筆進行中事件時取最高者）
         3. average_saturation    — 全路網平均飽和度，反映整體壅塞程度的單一數字
         4. multilingual_alert_count — SOP-6 觸發站點數，多語通報是否啟動的量化指標
-        5. system_mode           — "live"（Bedrock可用）｜"degraded"（保底模式），
+        5. system_mode           — "live"（Bedrock 實際可用）｜"degraded"（保底模式或
+                                    Bedrock 不通）｜"unknown"（尚未驗證），
                                     讓值班人員知道現在看到的建議書是AI生成還是模板
 
     crowd_data_classification 沿用 02-data-contract.md §8 的既有規則
@@ -436,7 +556,17 @@ class KpiSummary(BaseModel):
     current_level: TrafficLevel | None = None
     average_saturation: float | None = None
     multilingual_alert_count: int = 0
-    system_mode: Literal["live", "degraded"] = "live"
+    system_mode: Literal["live", "degraded", "unknown"] = "unknown"
+    """[2026-08-01] 新增 "unknown"，預設值從 "live" 改成 "unknown"。
+
+    原本只有 live/degraded 二分，而值是從 `USE_BEDROCK` 旗標推導的——旗標說的是
+    「允不允許呼叫」，不是「呼叫通不通」。憑證失效時這張卡片會顯示 **Live**，
+    但建議書早就退成模板版了。
+
+    現在改讀 `src/bedrock_status` 的實際探測結果。加第三態是因為「還沒驗證完」
+    歸進哪一邊都是說謊：歸 live 就是原本那個 bug，歸 degraded 又會讓剛啟動的
+    系統看起來壞掉。預設值同理從 "live"（樂觀假設）改成 "unknown"（誠實）。
+    """
 
 
 class DashboardPayload(BaseModel):
@@ -493,9 +623,23 @@ def build_envelope(
 
     schema_version / message_id / generated_at 在這裡產生，呼叫端不得自行指定，
     確保同一流程的多筆推播格式一致、message_id 不重複。
+
+    `correlation_id` 相反地必須由呼叫端傳入：同一個決策週期（同一 trace_id）發出的
+    多筆推播共用一個 correlation_id，前端才能把 cycle_start / task_update /
+    completed 串成同一次決策，這是 m5-api-orchestrator-dashboard/requirements.md
+    的 correlation_id 一致性要求，不能在這裡自動生成。
     """
-    raise NotImplementedError(
-        "TODO(Kiro): 依 m5-api-orchestrator-dashboard/design.md「Data Models」節實作："
-        "schema_version 用固定字串常數；message_id 用 uuid4；generated_at 用 "
-        "datetime.now(tz=Asia/Taipei) 並輸出 ISO 8601 +08:00。"
+    return MessageEnvelope(
+        schema_version=SCHEMA_VERSION,
+        message_id=str(uuid.uuid4()),
+        correlation_id=correlation_id,
+        message_type=message_type,
+        source_module=source_module,
+        target_module=target_module,
+        generated_at=datetime.now(tz=TZ_TAIPEI),
+        status=status,
+        provenance=provenance or [],
+        warnings=warnings or [],
+        errors=errors or [],
+        payload=payload,
     )

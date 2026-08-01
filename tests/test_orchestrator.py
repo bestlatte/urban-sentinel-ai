@@ -16,14 +16,41 @@ def test_post_what_if_routes_to_whatif_for_hypothetical_question():
         assert d["message_type"] == "whatif.evaluated.v1"
 
 
-def test_post_what_if_routes_to_trace_answer_for_retrospective_question():
-    """回溯追問（無前瞻詞 + 無 trace_id）→ trace.answered.v1 + 固定引導文字。"""
+def test_post_what_if_routes_general_question_to_agent():
+    """[2026-08-01 行為變更] 非前瞻、無 trace_id 的一般問題 → 交給 W1 Agent。
+
+    原本這裡斷言的是「→ trace.answered.v1 + 一句固定引導文字」，那正是實際
+    回報的「chatbot 問到不會的就死掉」：只要問題不含「如果」又沒有進行中的
+    決策週期，不管問什麼都回同一句話。
+
+    現在的規則是「非回溯問題一律進 Agent」——模型手上有 query_sop 與
+    simulate_scenario，該不該查 SOP 由它自己判斷，不再用關鍵字先替它決定。
+    """
     with TestClient(app) as client:
         r = client.post("/api/what-if", json={"session_id": "s2", "content": "目前狀況如何", "correlation_id": "c2"})
         d = r.json()
         assert d["status"] == "ok"
-        assert d["message_type"] == "trace.answered.v1"
-        assert "trace_id" in d["payload"]
+        assert d["message_type"] == "whatif.evaluated.v1"
+
+
+def test_what_if_payload_always_has_summary_field():
+    """所有路由分支的 payload 都必須是 W1Response 形狀。
+
+    回歸測試：回溯分支原本回 `{"trace_id", "answer_text"}`，而前端
+    `chat-render.js::renderAIResponse()` 讀的是 `summary`——欄位名對不上，
+    畫面上就是一個**完全空白的 AI 泡泡**。這是「chatbot 死了」的直接成因，
+    不是模型答不出來。
+    """
+    with TestClient(app) as client:
+        for content in ("目前狀況如何", "如果BL17到40000", "你好"):
+            r = client.post(
+                "/api/what-if",
+                json={"session_id": "s3", "content": content, "correlation_id": "c3"},
+            )
+            payload = r.json()["payload"]
+            assert "summary" in payload, f"{content!r} 的 payload 缺少 summary"
+            assert payload["summary"], f"{content!r} 的 summary 是空的"
+            assert "suggested_questions" in payload
 
 
 def test_decision_completed_message_type_not_decision_result():

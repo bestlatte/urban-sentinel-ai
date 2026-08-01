@@ -180,6 +180,26 @@ def _load_sop() -> list[SopClause]:
     ]
 
 
+_SEEN_DATA_WARNINGS: set[str] = set()
+"""已經回報過的資料品質警告，用來去重。
+
+[2026-08-01] `load_data()` 沒有快取，每次呼叫都重讀並重新驗證五個 JSON 檔。
+呼叫端包含每 10 秒跑一次的背景規則監測（`main.py::_periodic_rule_monitor`）、
+模擬器每個模擬分鐘一次，以及每一個 API 請求。於是這行警告
+
+    intersections 含外部交會點: 正氣橋 (in RD_TPE_009)
+
+**每 10 秒重複一次，永遠不停**，把主控台洗到看不見真正該注意的訊息
+（Bedrock 降級、生成失敗都是 WARNING 等級，混在裡面就等於沒有）。
+
+這類警告描述的是**靜態資料檔的性質**——檔案不改就不會變，講一次就夠了。
+重複講不會讓它更真，只會讓其他訊息更難被看見。
+
+用行程層級的 set 而不是 `lru_cache`：警告清單是 `_load_road_network()` 的
+回傳值，不是 `load_data()` 的參數，快取函式沒有適合的鍵。
+"""
+
+
 def load_data() -> NormalizedDataBundle:
     """載入並正規化五個 canonical 檔案（D1-D3）。
 
@@ -192,9 +212,12 @@ def load_data() -> NormalizedDataBundle:
     incidents = _load_incidents()
     sop = _load_sop()
 
-    if warnings:
-        for w in warnings:
-            logger.warning(w)
+    # 每種資料品質警告每個行程只講一次（見 `_SEEN_DATA_WARNINGS`）。
+    # 刻意不降級成 DEBUG——它仍然是該修的資料問題，只是不需要每 10 秒提醒一次。
+    for w in warnings:
+        if w not in _SEEN_DATA_WARNINGS:
+            _SEEN_DATA_WARNINGS.add(w)
+            logger.warning("%s（同類警告本次啟動後不再重複）", w)
 
     return NormalizedDataBundle(
         traffic=traffic,

@@ -193,12 +193,11 @@ def test_answer_trace_query_findings_hit(monkeypatch):
 
 
 # -- M4B #6：報告冪等 --
-def test_generate_report_explanation_idempotent(monkeypatch):
-    """快取命中時不重複生成。由於 LLM 尚未接通，目前會拋 RuntimeError。"""
+def test_generate_report_explanation_raises_in_fallback_mode(monkeypatch):
+    """USE_BEDROCK=false（保底模式）→ 拋 RuntimeError，由呼叫端降級。"""
     monkeypatch.setenv("USE_BEDROCK", "false")
     open_trace("TR-M4B-06", ["§1"])
     record_step("TR-M4B-06", "A2", "PLAN", {}, {})
-    # USE_BEDROCK=false 時會拋 RuntimeError
     with pytest.raises(RuntimeError):
         generate_report_explanation("TR-M4B-06")
 
@@ -218,3 +217,149 @@ def test_answer_trace_query_fallback(monkeypatch):
                 subject_segment_ids=["RD_TPE_004"])
     result = answer_trace_query("TR-M4B-08", "市民大道四段狀況")
     assert "系統暫時無法生成說明" in result or "sequence_no" in result
+
+
+# ===========================================================================
+# M4B LLM 生成路徑（USE_BEDROCK=true，以 mock 取代 Bedrock 呼叫）
+#
+# 上面那批測試涵蓋的是保底模式與確定性分支；這批專測「LLM 真的被接上之後」
+# 的行為：冪等、失敗處理、以及 SPEC-M4B §5 提示詞契約。
+# ===========================================================================
+
+import json
+
+from src import decision_trace as dt
+
+
+class _LlmSpy:
+    """代替 `_invoke_m4b_llm`：記錄呼叫次數與收到的輸入。"""
+
+    def __init__(self, response="【決策說明】依 SOP-2 排除 RD_TPE_008。", error=None):
+        self.response = response
+        self.error = error
+        self.calls = 0
+        self.last_input = None
+
+    def __call__(self, user_message):
+        self.calls += 1
+        self.last_input = user_message
+        if self.error:
+            raise self.error
+        return self.response
+
+
+# -- M4B §5：提示詞契約四條規則，不得增減 --
+def test_m4b_prompt_contract_has_exactly_four_rules():
+    lines = [ln for ln in dt.M4B_SYSTEM_PROMPT.splitlines() if ln.strip()[:2] in
+             ("1.", "2.", "3.", "4.", "5.")]
+    assert len(lines) == 4
+    assert "不得添加任何未出現的細節" in dt.M4B_SYSTEM_PROMPT
+    assert "sop_ref" in dt.M4B_SYSTEM_PROMPT
+    assert "紀錄中未包含此資訊" in dt.M4B_SYSTEM_PROMPT
+    assert "繁體中文" in dt.M4B_SYSTEM_PROMPT
+
+
+# -- M4B #6：報告冪等（第二次不呼叫 LLM，字串相同）--
+def test_generate_report_explanation_is_idempotent(monkeypatch):
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy()
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    open_trace("TR-M4B-10", ["§2"])
+    record_step("TR-M4B-10", "R4", "ROUTE_SELECT", {}, {},
+                subject_segment_ids=["RD_TPE_004"])
+
+    first = generate_report_explanation("TR-M4B-10")
+    second = generate_report_explanation("TR-M4B-10")
+
+    assert first == second == spy.response
+    assert spy.calls == 1
+
+
+def test_generate_report_explanation_input_contains_trace_facts(monkeypatch):
+    """輸入必須含 TraceMeta.triggered_by 與結構化 steps（SPEC-M4B §5）。"""
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy()
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    open_trace("TR-M4B-11", ["§2"])
+    record_step("TR-M4B-11", "R4", "ROUTE_SELECT", {}, {},
+                excluded=[ExcludedItem(segment_id="RD_TPE_008",
+                                       reason_code="CAPACITY_INSUFFICIENT")])
+    generate_report_explanation("TR-M4B-11")
+
+    payload = json.loads(spy.last_input)
+    assert payload["triggered_by"] == ["§2"]
+    assert payload["steps"][0]["excluded"][0]["reason_code"] == "CAPACITY_INSUFFICIENT"
+
+
+# -- M4B #9：報告 LLM 失敗 → 拋例外，不回傳部分內容 --
+def test_generate_report_explanation_propagates_llm_failure(monkeypatch):
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy(error=RuntimeError("bedrock throttled"))
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    open_trace("TR-M4B-12", ["§1"])
+    record_step("TR-M4B-12", "A2", "PLAN", {}, {})
+
+    with pytest.raises(RuntimeError, match="throttled"):
+        generate_report_explanation("TR-M4B-12")
+    # 失敗不得進快取，否則後續重試會拿到殘缺結果
+    assert "TR-M4B-12" not in dt._EXPLANATION_CACHE
+
+
+# -- M4B #8：追問 LLM 失敗 → 降級顯示原始紀錄，不拋出 --
+def test_answer_trace_query_degrades_on_llm_failure(monkeypatch):
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy(error=RuntimeError("bedrock down"))
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    open_trace("TR-M4B-13", ["§2"])
+    record_step("TR-M4B-13", "R4", "ROUTE_SELECT", {}, {},
+                excluded=[ExcludedItem(segment_id="RD_TPE_008",
+                                       reason_code="CAPACITY_INSUFFICIENT")])
+
+    result = answer_trace_query("TR-M4B-13", "延吉街為什麼不能走")
+    assert "系統暫時無法生成說明" in result
+    assert "CAPACITY_INSUFFICIENT" in result
+
+
+def test_answer_trace_query_uses_llm_when_records_hit(monkeypatch):
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy(response="延吉街容量不足，依 SOP-2 排除。")
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    open_trace("TR-M4B-14", ["§2"])
+    record_step("TR-M4B-14", "R4", "ROUTE_SELECT", {}, {},
+                excluded=[ExcludedItem(segment_id="RD_TPE_008",
+                                       reason_code="CAPACITY_INSUFFICIENT")])
+
+    result = answer_trace_query("TR-M4B-14", "延吉街為什麼不能走")
+    assert result == spy.response
+    assert spy.calls == 1
+    payload = json.loads(spy.last_input)
+    assert payload["question"] == "延吉街為什麼不能走"
+    assert payload["target_segment_id"] == "RD_TPE_008"
+
+
+# -- M4B #1/#2：確定性分支不得呼叫 LLM --
+@pytest.mark.parametrize(
+    "question,expected",
+    [
+        ("今天天氣很好", "無法識別"),
+        ("基隆路一段的狀況如何", "未列入本次判斷"),
+    ],
+)
+def test_deterministic_branches_never_call_llm(monkeypatch, question, expected):
+    monkeypatch.setenv("USE_BEDROCK", "true")
+    spy = _LlmSpy()
+    monkeypatch.setattr(dt, "_invoke_m4b_llm", spy)
+
+    trace_id = f"TR-M4B-15-{abs(hash(question)) % 1000}"
+    open_trace(trace_id, ["§2"])
+    record_step(trace_id, "R4", "ROUTE_SELECT", {}, {},
+                subject_segment_ids=["RD_TPE_004"])
+
+    result = answer_trace_query(trace_id, question)
+    assert expected in result
+    assert spy.calls == 0

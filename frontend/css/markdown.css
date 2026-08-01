@@ -1,0 +1,118 @@
+/*
+ * Markdown 渲染樣式，搭配 frontend/js/markdown.js。
+ *
+ * 套用範圍限定在 .md 容器內，不會外溢影響既有版面——這是刻意的：
+ * 建議書與對話回覆是唯二需要 Markdown 的地方，其餘 UI 都是自己刻的結構。
+ *
+ * 設計取向：**緊湊**。這是指揮中心的側邊面板與對話氣泡，不是文件網站。
+ * 標題與段落的上下間距刻意壓到比一般 Markdown 樣式小，避免 500 字的建議書
+ * 撐出三個螢幕高。
+ */
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  margin: 0 0 0.6em;
+  line-height: 1.65;
+}
+
+/* 標題：靠字重與字級區分層級，不用底線或色塊，避免跟卡片邊框打架 */
+.md .md-h {
+  margin: 1em 0 0.4em;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text, inherit);
+  letter-spacing: -0.01em;
+}
+
+.md h2.md-h {
+  font-size: 1.05em;
+}
+
+.md h3.md-h {
+  font-size: 0.98em;
+}
+
+.md h4.md-h {
+  font-size: 0.94em;
+  color: var(--text-secondary, inherit);
+}
+
+.md .md-list {
+  margin: 0 0 0.6em;
+  padding-left: 1.25em;
+}
+
+.md .md-list li {
+  margin-bottom: 0.25em;
+  line-height: 1.6;
+}
+
+.md strong {
+  font-weight: 650;
+  color: var(--text, inherit);
+}
+
+.md .md-code {
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.16);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.md .md-hr {
+  margin: 0.9em 0;
+  border: none;
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.md .md-quote {
+  margin: 0 0 0.6em;
+  padding: 0.4em 0.75em;
+  border-left: 3px solid rgba(127, 127, 127, 0.4);
+  background: rgba(127, 127, 127, 0.07);
+  color: var(--text-secondary, inherit);
+}
+
+/* 表格：橫向可捲動。側邊面板很窄，寬表格若不能捲就會撐破版面
+   （或被裁切到看不到最後一欄）。 */
+.md .md-table-wrap {
+  margin: 0 0 0.7em;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.md .md-table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+  min-width: 100%;
+}
+
+.md .md-table th,
+.md .md-table td {
+  padding: 0.3em 0.6em;
+  border: 1px solid rgba(127, 127, 127, 0.28);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.md .md-table th {
+  font-weight: 650;
+  background: rgba(127, 127, 127, 0.1);
+}
+
+/* 對話氣泡裡的 Markdown 再壓縮一點——氣泡本來就窄 */
+.msg-bubble.md p {
+  margin-bottom: 0.5em;
+}
+
+.msg-bubble.md .md-h {
+  margin: 0.7em 0 0.3em;
+}

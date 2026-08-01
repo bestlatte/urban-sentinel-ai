@@ -7,15 +7,13 @@
 
 from __future__ import annotations
 
-import os
 import re
 
 import boto3
 
 from src.bedrock_service.sop_data import SOP_DATA, SopMatch
+from src.llm import get_knowledge_base_id, get_region
 
-AWS_REGION = os.getenv("AWS_REGION", "us-west-2")
-BEDROCK_KNOWLEDGE_BASE_ID = os.getenv("BEDROCK_KNOWLEDGE_BASE_ID", "")
 RELEVANCE_THRESHOLD = 0.3
 MAX_RESULTS = 3
 
@@ -48,11 +46,15 @@ def query_bedrock_kb(question: str) -> list[SopMatch]:
     """呼叫 Bedrock KB Retrieve API，並用回傳結果辨識 section_number 後，
     從本機 SOP_DATA 取完整原文——KB 回傳的 text 可能被 chunking 切斷，
     不得直接拿來當 content。
+
+    [2026-08-01] region 與 KB ID 改成呼叫時才讀（`src/llm.py`），不再是
+    import-time 模組常數——原本 import 之後就固化，`.env` 載入時機只要晚一步
+    就會連到錯的 region 或用到空的 KB ID，而且完全沒有徵兆。
     """
-    client = boto3.client("bedrock-agent-runtime", region_name=AWS_REGION)
+    client = boto3.client("bedrock-agent-runtime", region_name=get_region())
 
     response = client.retrieve(
-        knowledgeBaseId=BEDROCK_KNOWLEDGE_BASE_ID,
+        knowledgeBaseId=get_knowledge_base_id(),
         retrievalQuery={"text": question},
         retrievalConfiguration={
             "vectorSearchConfiguration": {

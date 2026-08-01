@@ -234,35 +234,66 @@ def plan_route(request: RouteRequest) -> RoutePlan:
         if len(eligible_downstream) > 1:
             secondary = eligible_downstream[1]
     else:
-        # 檢查是否有唯一飽和候選可保留 (SATURATED_BUT_RETAINED)
-        saturated_candidates = [c for c in all_candidates if c.reason_code == "SATURATED"]
-        if len(saturated_candidates) == 1:
-            retained = saturated_candidates[0]
-            # 保留：改為 eligible
-            retained_new = RouteCandidate(
-                segment_id=retained.segment_id,
-                name=retained.name,
-                eligible=True,
-                reason_code=None,
-                saturation_score=retained.saturation_score,
-                capacity_vph=retained.capacity_vph,
-                snapshot_at=retained.snapshot_at,
-            )
-            primary = retained_new
-            # 從 excluded 移除
-            excluded = [e for e in excluded if e.segment_id != retained.segment_id]
-            # 更新 all_candidates
-            all_candidates = [
-                retained_new if c.segment_id == retained.segment_id else c
-                for c in all_candidates
-            ]
-            # 記 finding
+        # 沒有任何未飽和的候選 → 依 SOP-2 §2a 保留飽和候選，不是放棄。
+        #
+        # 條文原文：「若主替代路段已飽和 (Saturation_Score >= 0.85)，**仍指派
+        # 該路線**並啟動『長綠燈時制』，說明可能仍飽和並建議搭乘大眾運輸。」
+        #
+        # [2026-08-01 修正] 原本這裡寫 `if len(saturated_candidates) == 1`，
+        # 只在**唯一**飽和候選時才保留。那個條件不在 SOP 裡，而且會產生一個
+        # 邏輯上說不通的結果：
+        #
+        #     1 條候選飽和 → 指派該路線 + 長綠燈時制
+        #     2 條候選飽和 → 什麼都不給，回報「無可行替代路線」
+        #
+        # 選項變多反而結果變差。實測就是這樣壞的：假設光復南路坍塌，相鄰候選
+        # 市民大道四段(0.98) 與 仁愛路四段(0.92) 都飽和 → 兩條 → 直接放棄，
+        # 回「周邊路網全數飽和無法承接」。但 SOP 要的是指派仁愛路四段
+        # （飽和度較低、容量 4000）並啟動長綠燈時制。
+        #
+        # 指揮官需要的是「最不糟的那條路 + 配套措施」，不是「沒有辦法」。
+        # 事故現場的車流不會因為系統說沒路就消失。
+        saturated_upstream = [c for c in upstream_eligible if c.reason_code == "SATURATED"]
+        saturated_downstream = [c for c in downstream_eligible if c.reason_code == "SATURATED"]
+        saturated_upstream.sort(key=sort_key)
+        saturated_downstream.sort(key=sort_key)
+        # 上游優先，跟未飽和情境的排序原則一致
+        ranked_saturated = saturated_upstream + saturated_downstream
+
+        if ranked_saturated:
+            retained_list: list[RouteCandidate] = []
+            for cand in ranked_saturated[:2]:  # 主 + 次，多的仍留在 excluded 供追溯
+                retained_new = RouteCandidate(
+                    segment_id=cand.segment_id,
+                    name=cand.name,
+                    eligible=True,
+                    reason_code=None,
+                    saturation_score=cand.saturation_score,
+                    capacity_vph=cand.capacity_vph,
+                    snapshot_at=cand.snapshot_at,
+                )
+                retained_list.append(retained_new)
+                excluded = [e for e in excluded if e.segment_id != cand.segment_id]
+                all_candidates = [
+                    retained_new if c.segment_id == cand.segment_id else c
+                    for c in all_candidates
+                ]
+
+            primary = retained_list[0]
+            if len(retained_list) > 1:
+                secondary = retained_list[1]
+
+            # finding 要列出全部被保留的路段——指揮官必須知道這些路線**本來就滿了**，
+            # 指派它們是「沒有更好的選擇」而不是「這條路很順」。
             findings.append(RouteFinding(
                 finding_code="SATURATED_BUT_RETAINED",
-                segment_ids=[retained.segment_id],
+                segment_ids=[c.segment_id for c in retained_list],
                 evidence={
-                    "saturation_score": retained.saturation_score,
-                    "action": "啟動長綠燈時制、綠燈延長 25%",
+                    "saturation_scores": {
+                        c.segment_id: c.saturation_score for c in retained_list
+                    },
+                    "action": "啟動長綠燈時制、綠燈延長 25%，並同步建議改用大眾運輸",
+                    "sop_ref": "SOP-2 §2a",
                 },
             ))
 

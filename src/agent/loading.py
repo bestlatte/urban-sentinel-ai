@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Callable, Awaitable
 
 LOADING_STEPS = [
@@ -67,33 +66,32 @@ def broadcast_loading_start_sync(
     ws_broadcaster: Callable[[dict], Awaitable[int]] | None,
     correlation_id: str,
 ) -> None:
-    """同步版本：在非 async 上下文中使用。"""
+    """同步版本：在非 async 上下文中使用。
+
+    [2026-08-01 改用 async_bridge]
+    原本是 `asyncio.get_event_loop()` + `ensure_future`，那假設呼叫端人在
+    event loop 執行緒上。`main.py::what_if()` 改成 `asyncio.to_thread` 之後
+    整條 W1 流程都跑在工作執行緒，該假設不成立——`get_event_loop()` 會拋
+    `RuntimeError`，被外層 `except: pass` 吃掉，**進度條推播靜默消失**。
+
+    用 `dispatch_and_wait` 而不是 `dispatch`：loading 開始必須確定先於答案
+    抵達前端，射後不理的話兩者會賽跑。
+    """
     if ws_broadcaster is None:
         return
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # 在已經跑著的 event loop 裡不能用 run_until_complete
-            # 這種情況下只能跳過（process_whatif_request 是同步函式被 async 端點呼叫）
-            asyncio.ensure_future(broadcast_loading_start(ws_broadcaster, correlation_id))
-        else:
-            loop.run_until_complete(broadcast_loading_start(ws_broadcaster, correlation_id))
-    except Exception:
-        pass
+    from src.async_bridge import dispatch_and_wait
+
+    dispatch_and_wait(broadcast_loading_start(ws_broadcaster, correlation_id))
 
 
 def broadcast_loading_complete_sync(
     ws_broadcaster: Callable[[dict], Awaitable[int]] | None,
     correlation_id: str,
 ) -> None:
-    """同步版本：在非 async 上下文中使用。"""
+    """同步版本：在非 async 上下文中使用。理由同 `broadcast_loading_start_sync`。"""
     if ws_broadcaster is None:
         return
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(broadcast_loading_complete(ws_broadcaster, correlation_id))
-        else:
-            loop.run_until_complete(broadcast_loading_complete(ws_broadcaster, correlation_id))
-    except Exception:
-        pass
+    from src.async_bridge import dispatch
+
+    # 完成訊號不需要等——後面沒有順序相依的推播了，REST 回應本身就是終點。
+    dispatch(broadcast_loading_complete(ws_broadcaster, correlation_id))

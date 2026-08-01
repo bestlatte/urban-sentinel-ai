@@ -1,0 +1,120 @@
+/* 決策週期進度條 — 見 frontend/js/cycle-progress.js 的設計說明。
+ *
+ * 定位在畫面正上方置中，浮在所有內容之上但不遮擋操作區：LLM 生成期間使用者
+ * 通常還在看儀表板與模擬時鐘，把進度條做成強制性的遮罩反而妨礙他們。
+ */
+
+.cycle-progress {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-16px);
+  /* [2026-08-01] 900 → 1100。原本低於 modal 的 1000，事件預警彈窗一出來就把
+     進度條蓋住，看起來像它自己消失了。進度條是**狀態列**不是內容——被蓋住就
+     失去存在意義，所以放在所有覆蓋層之上（只低於 alert-stack 的 9999）。 */
+  z-index: 1100;
+
+  min-width: 260px;
+  max-width: min(420px, 90vw);
+  padding: 10px 14px 12px;
+
+  background: var(--bg-elevated, #131316);
+  border: 1px solid var(--border, #1f1f23);
+  border-radius: var(--chat-radius, 8px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+
+.cycle-progress.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.cycle-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.cycle-progress-label {
+  flex: 1;
+  font-size: 0.78rem;
+  color: var(--text-secondary, #a1a1aa);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cycle-progress-eta {
+  font-size: 0.7rem;
+  color: var(--text-muted, #71717a);
+  /* 等寬數字：倒數時數字不會左右跳動 */
+  font-variant-numeric: tabular-nums;
+}
+
+.cycle-progress-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid var(--border-hover, #2a2a2f);
+  border-top-color: var(--chat-success, hsl(142, 71%, 45%));
+  border-radius: 50%;
+  animation: cycle-progress-spin 0.8s linear infinite;
+}
+
+@keyframes cycle-progress-spin {
+  to { transform: rotate(360deg); }
+}
+
+.cycle-progress-track {
+  height: 4px;
+  background: var(--border, #1f1f23);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.cycle-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--chat-success, hsl(142, 71%, 45%)),
+    var(--route-secondary, hsl(48, 96%, 53%))
+  );
+  /* 進度是估計值驅動的，用較長的 transition 讓每 100ms 一次的更新看起來連續 */
+  transition: width 0.18s linear;
+}
+
+/* ---- 不定量狀態 ----
+ * 超過預估耗時之後進入這個狀態：系統不知道還要多久，所以不再用「填滿到某個
+ * 比例」假裝知道。改成一小段來回跑的光條——它表達的是「還在動」，不是「進度
+ * 到哪」，這正是此刻唯一為真的資訊。 */
+
+.cycle-progress.indeterminate .cycle-progress-fill {
+  width: 35%;
+  transition: none;
+  animation: cycle-progress-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes cycle-progress-sweep {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+/* 使用者關閉動畫偏好時，停掉旋轉與漸變——這條進度條是資訊，不是裝飾 */
+@media (prefers-reduced-motion: reduce) {
+  .cycle-progress,
+  .cycle-progress-fill { transition: none; }
+  .cycle-progress-spinner { animation: none; }
+  /* 不定量狀態改成固定半滿：動畫關掉後仍要看得出「還在跑」 */
+  .cycle-progress.indeterminate .cycle-progress-fill {
+    animation: none;
+    width: 50%;
+    margin-left: 25%;
+  }
+}

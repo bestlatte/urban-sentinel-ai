@@ -15,15 +15,41 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
+# [2026-08-01] 設定日誌，否則本檔與 `src/*` 的 `logger.info()` **一行都不會出現**。
+#
+# 實測：Python 根 logger 預設等級是 WARNING，而 uvicorn 只設定它自己的
+# `uvicorn.*` logger。所以在此之前，所有 `logger.info(...)` 都是寫給空氣看的——
+# 包含「Bedrock 探測成功：model=…」這種 Demo 前最需要確認的訊息。
+# `logger.warning` 以上因為超過根 logger 門檻才碰巧看得到。
+#
+# 只把自己的模組拉到 INFO，第三方留在 WARNING：botocore/urllib3 的 INFO 會把
+# 每次 HTTP 請求都印出來，Demo 現場的主控台會被洗版，真正重要的訊息反而看不見。
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logging.getLogger("src").setLevel(logging.INFO)
+logging.getLogger(__name__).setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+# [2026-08-01] `.env` 載入必須在**所有其他 import 之前**。
+# 有些模組會在 import 時就讀環境變數（例如 `bedrock_service/sop_data.py` 讀檔、
+# 早期版本的 `sop_retriever.USE_BEDROCK` 讀旗標），晚一步載入這些值就已經固化成
+# 錯的了。在此之前全 repo 沒有任何一行讀 `.env`——寫進去的值一直是沒有作用的，
+# 見 `src/env.py` 的說明。
+from src.env import load_env  # noqa: E402
 
-from src import orchestrator
-from src.ws_manager import ConnectionManager
+load_env()
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from pydantic import ValidationError  # noqa: E402
+
+from src import orchestrator  # noqa: E402
+from src.ws_manager import ConnectionManager  # noqa: E402
 
 app = FastAPI()
 ws_manager = ConnectionManager()
@@ -34,6 +60,77 @@ ws_manager = ConnectionManager()
 # 的 handle_incident/handle_trigger_batch 永遠只會看到 None。改成直接賦值給
 # orchestrator 模組本身，確保只有一份 GATEWAY 實例。
 orchestrator.GATEWAY = orchestrator.build_gateway()
+
+
+@app.on_event("startup")
+async def _register_main_loop():
+    """把主 event loop 登記給 `src/async_bridge`。
+
+    決策週期與 W1 對話現在都跑在工作執行緒（`asyncio.to_thread`），那些執行緒
+    裡的同步程式碼要推 WebSocket 訊息時，需要一個明確的 loop 參照才送得出去。
+    必須在任何請求進來之前登記，所以放在 startup。
+    """
+    from src.async_bridge import set_main_loop
+    from src import bedrock_status
+
+    set_main_loop()
+    bedrock_status.set_broadcaster(ws_manager.broadcast)
+
+
+@app.on_event("startup")
+async def _probe_bedrock():
+    """啟動時真的呼叫一次 Bedrock，確認「現在到底通不通」。
+
+    為什麼要探測而不是讀旗標
+    ------------------------
+    `USE_BEDROCK=true` 說的是「**允許**呼叫」，不是「呼叫**通得了**」。兩者分歧時
+    （憑證失效、金鑰停用、模型下架、斷網），系統原本會一路顯示正常，只有建議書
+    安靜地退成模板版——Demo 現場幾乎不可能當場察覺。
+
+    探測用 `max_tokens=1`，成本可忽略，但驗到的東西跟完整呼叫一樣多：憑證有效、
+    有 InvokeModel 權限、模型 ID 存在且已開通。
+
+    放在 `to_thread`：boto3 是同步的，直接 await 會擋住其他 startup handler
+    與第一批請求。探測失敗不影響啟動——保底模式本來就該能跑。
+    """
+    import asyncio
+
+    from src import bedrock_status
+
+    try:
+        await asyncio.to_thread(bedrock_status.probe)
+        status = bedrock_status.get_status()
+    except Exception as e:
+        logger.warning(f"Bedrock 啟動探測異常（不影響啟動）: {e}")
+        return
+
+    _print_startup_banner(status)
+
+
+def _print_startup_banner(status: dict) -> None:
+    """把 Bedrock 實況印成一眼看得懂的區塊。
+
+    用 `print` 而不是 `logger`：這是**給人在 Demo 前確認的**，不是給日誌收集器的。
+    它必須在終端機上明顯到不可能錯過——「我這次到底有沒有在用 Bedrock 模型」
+    是每次 Demo 前都要回答的問題，答案不該埋在一行 INFO 裡跟其他訊息混在一起。
+    """
+    mode = status["mode"]
+    marks = {"live": "[OK]", "degraded": "[!!]", "unknown": "[??]"}
+    line = "=" * 62
+
+    print(line)
+    print(f"  {marks.get(mode, '[??]')}  系統模式：{mode.upper()}")
+    print(f"       {status['message']}")
+    if mode == "live":
+        print(f"       模型　：{status['active_model_id']}")
+        print(f"       建議書：{status['configured_report_model_id']}")
+        print(f"       區域　：{status['region']}　延遲：{status['last_latency_ms']}ms")
+    else:
+        print(f"       設定的模型：{status['configured_model_id']}")
+        if status["last_error"]:
+            print(f"       錯誤　：{status['last_error'][:150]}")
+        print("       決定性模組（規則／路網／ETE）不受影響，黃金值照常")
+    print(line)
 
 
 @app.on_event("startup")
@@ -157,11 +254,15 @@ async def _evaluate_and_alert_at_simtime() -> None:
     當偵測到路段飽和時，同時檢查該路段是否為某個活躍事件的推薦路線，
     若是則觸發路線重規劃並推播 routes.updated.v1。
     """
+    import asyncio
+
     sim_time = _simulation_state.get("current_time")
     if not sim_time:
         return
-    
-    bundle = orchestrator.GATEWAY.load_data()
+
+    # 每個模擬分鐘都會跑一次，內含檔案 I/O 與全路段掃描（~100ms+）。
+    # 留在 event loop 上會讓時鐘每分鐘頓一下，跟這次修掉的建議書阻塞是同一種病。
+    bundle = await asyncio.to_thread(orchestrator.GATEWAY.load_data)
     
     # 初始化路段等級追蹤（如果還沒有）
     if "segment_levels" not in _simulation_state:
@@ -270,8 +371,9 @@ async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of
         if not affected:
             continue
         
-        # 觸發重規劃
-        result = orchestrator.check_and_replan_routes(event_id, as_of)
+        # 觸發重規劃（內含 load_data + plan_routes，同樣不放在 event loop 上）
+        import asyncio
+        result = await asyncio.to_thread(orchestrator.check_and_replan_routes, event_id, as_of)
         
         if result and result.replanned:
             # 推播 routes.updated.v1 通知前端
@@ -319,8 +421,10 @@ async def _periodic_rule_monitor() -> None:
         # 非模擬模式：只做一次性的規則評估供 Dashboard 顯示，不做預警推播
         # 因為資料是靜態歷史資料，持續推播沒有意義
         try:
-            bundle = orchestrator.GATEWAY.load_data()
-            sensing = orchestrator.GATEWAY.evaluate_rules(bundle, incident=None)
+            bundle = await asyncio.to_thread(orchestrator.GATEWAY.load_data)
+            sensing = await asyncio.to_thread(
+                orchestrator.GATEWAY.evaluate_rules, bundle, None
+            )
 
             # 只推播 rules.evaluated.v1 讓 F1 顯示，不做 alert
             sensing_payload = sensing.model_dump(mode="json")
@@ -411,10 +515,40 @@ def _evaluate_rules_at_time(bundle, as_of: datetime):
         multilingual_required=multilingual_required,
     )
 
-# frontend/ 以 StaticFiles(html=True) 掛在 /，API 前綴 /api 與 /ws 不會被靜態路由吃掉。
-app.mount("/frontend", StaticFiles(directory="frontend", html=True), name="frontend")
+class SafeStaticFiles(StaticFiles):
+    """StaticFiles，但畸形路徑回 404 而不是 500。
+
+    [2026-08-01 實測] Windows 上只要網址含檔名非法字元（`*` `?` `:` `<` `>` `|`），
+    `os.stat()` 會拋 `OSError: [WinError 123] 檔案名稱、目錄名稱或磁碟區標籤語法錯誤`，
+    而 Starlette 的 `StaticFiles.lookup_path()` 只接 `FileNotFoundError`，於是這個
+    OSError 一路往上炸成 **HTTP 500 + 整頁 traceback**。
+
+    實際觸發的請求（真的發生過）：
+        GET /frontend/%2A%2A%EF%BC%88%E8%A8%98%E5%BE%97...
+        → 解碼後是 `/frontend/**（記得重新整理，或用`
+
+    來源是聊天訊息裡的網址被 Markdown 粗體符號吃進去，點下去就送出畸形路徑。
+    使用者手殘打錯網址也會一樣。**找不到的東西就該回 404**，不該讓 Demo 現場
+    的主控台噴一頁紅字，看起來像系統壞了。
+
+    只攔 OSError（含 ValueError——路徑含 NUL 位元組時是這個），其餘例外照常往上，
+    不會掩蓋真正的伺服器錯誤。
+    """
+
+    def lookup_path(self, path: str):
+        try:
+            return super().lookup_path(path)
+        except (OSError, ValueError):
+            # 回 ("", None) 是 Starlette 對「找不到」的既定表示法，
+            # 上層 get_response() 看到 None 就會回 404。
+            logger.debug("靜態檔路徑不合法，回 404: %r", path)
+            return "", None
+
+
+# frontend/ 掛在 /frontend（不是 /），API 前綴 /api 與 /ws 不會被靜態路由吃掉。
+app.mount("/frontend", SafeStaticFiles(directory="frontend", html=True), name="frontend")
 # data/ 掛載供前端 fetch display_geometry.json（僅 SVG 顯示用，不參與演算）
-app.mount("/data", StaticFiles(directory="data"), name="data")
+app.mount("/data", SafeStaticFiles(directory="data"), name="data")
 
 
 @app.exception_handler(Exception)
@@ -500,9 +634,11 @@ async def get_dashboard():
     )
 
     # 系統模式
-    import os
-    use_bedrock = os.getenv("USE_BEDROCK", "true").lower() == "true"
-    system_mode = "live" if use_bedrock else "degraded"
+    # [2026-08-01] 原本是 `"live" if os.getenv("USE_BEDROCK") else "degraded"`——
+    # 讀旗標，所以憑證失效時 KPI 卡片照樣顯示「Live」。改讀實際探測結果。
+    # `unknown`（還沒驗證完）由前端顯示成「檢查中」，不冒充 Live。
+    from src import bedrock_status
+    system_mode = bedrock_status.get_status()["mode"]
 
     kpis = KpiSummary(
         crowd_data_classification=DataProvenance.PROVIDED,
@@ -597,7 +733,8 @@ async def evaluate_incident(body: dict):
 
 @app.post("/api/what-if")
 async def what_if(body: dict):
-    """三分支路由：前瞻假設 → W1、回溯追問 → M4B、無週期 → 固定文字。"""
+    """對話端點：回溯追問 → M4B，其餘 → W1 Agent（路由見 `handle_user_query`）。"""
+    import asyncio
     from dataclasses import asdict
 
     session_id = body.get("session_id", "")
@@ -611,7 +748,22 @@ async def what_if(body: dict):
             "errors": [{"code": "VALIDATION_ERROR", "message": "session_id 與 content 為必填"}],
         })
 
-    result = orchestrator.handle_user_query(
+    # [2026-08-01 修正：這一行原本會凍結整個伺服器]
+    # `handle_user_query()` 是同步函式，裡面是最長 60 秒的阻塞 Bedrock 呼叫
+    # （`llm.AGENT_TIMEOUT_S`）。直接在 `async def` 端點裡呼叫等於霸佔 event loop：
+    # 那 60 秒內 WebSocket 推播、模擬器 tick（`_simulation_tick_loop`）、其他 API
+    # 全部停擺。決策週期那邊早就用 `asyncio.to_thread` 處理過同樣的問題
+    # （`orchestrator.py` 的 A2 規劃器），只有這裡漏了。
+    #
+    # 附帶修好 loading 進度條：`agent/loading.py` 用 `asyncio.ensure_future()`
+    # 排推播，但 loop 被佔住時那些 coroutine 一個都跑不了，要等端點回傳才會被
+    # 執行——使用者看到的是「空白 30 秒，然後 loading 跟答案同時出現」。
+    # 現在主流程讓出 loop，推播就會即時送達。
+    #
+    # ContextVar（`orchestrator._current_trace_ctx`）由 `asyncio.to_thread` 自動
+    # 複製到工作執行緒，不需要額外處理。
+    result = await asyncio.to_thread(
+        orchestrator.handle_user_query,
         question=content,
         current_trace_id=current_trace_id,
         session_id=session_id,
@@ -634,12 +786,33 @@ async def what_if(body: dict):
 
 
 @app.get("/api/health")
-async def health():
-    """不使用 Envelope。回傳 {status, use_bedrock, gateway_mode}。"""
-    import os
+async def health(probe: bool = False):
+    """不使用 Envelope。回傳系統實際狀態（不是設定檔寫了什麼）。
+
+    [2026-08-01 修正：這個端點原本會騙人]
+    ------------------------------------
+    原本回傳的 `use_bedrock` 是直接讀 `os.getenv("USE_BEDROCK")`——那是「允不允許
+    呼叫」的旗標，不是「呼叫通不通」。憑證失效時這裡照樣回 `true`，而建議書
+    早就退成模板版了。Demo 前想確認「我現在真的在用 Bedrock 模型嗎」，這個端點
+    給不出答案。
+
+    現在多回一個 `bedrock` 區塊，內容來自 `src/bedrock_status`——啟動探測與每次
+    真實 LLM 呼叫的結果都會寫進去。`active_model_id` 是**最後一次成功呼叫實際
+    送出的模型 ID**，這是「我到底在用哪個模型」唯一可信的答案。
+
+    Args:
+        probe: `?probe=true` 時當場重新探測一次（Demo 前確認用）。預設讀快取，
+            避免每次健康檢查都花一次 Bedrock 呼叫。
+    """
+    import asyncio
+
+    from src import bedrock_status
     from src.orchestrator import StubGateway, LiveGateway
 
-    use_bedrock = os.getenv("USE_BEDROCK", "true").lower() == "true"
+    if probe:
+        await asyncio.to_thread(bedrock_status.probe)
+
+    status = bedrock_status.get_status()
 
     gw = orchestrator.GATEWAY
     if isinstance(gw, StubGateway):
@@ -649,7 +822,45 @@ async def health():
     else:
         gateway_mode = "mixed"
 
-    return {"status": "ok", "use_bedrock": use_bedrock, "gateway_mode": gateway_mode}
+    return {
+        "status": "ok",
+        # 保留舊欄位：既有的前端輪詢與 preflight 都讀它，不要為了改結構破壞它們。
+        # 但語意已經釐清——它是旗標，實況看 `bedrock` 區塊。
+        "use_bedrock": status["enabled"],
+        "gateway_mode": gateway_mode,
+        "bedrock": status,
+    }
+
+
+@app.get("/api/trace/{trace_id}")
+async def get_trace(trace_id: str):
+    """取得決策軌跡全文，供前端「決策軌跡」面板與對話卡片使用。
+
+    [2026-08-01 新增] 在此之前決策軌跡**沒有任何對外出口**——`decision_trace`
+    模組只被 M4B 生成層在行程內讀取。前端 F7「決策依據」分頁看起來像在顯示軌跡，
+    其實是自己從 WebSocket 的 task_update 事件拼的活動紀錄（「發生了什麼」，
+    不是「依據什麼判斷」），而且斷線就永久缺一塊。
+
+    軌跡存在行程記憶體（`DECISION_LOG_TABLE` 那條 DynamoDB 路線從未實作），
+    所以伺服器重啟後舊的 trace_id 會查不到——回 DATA_NOT_FOUND 而不是 500。
+    """
+    from src.decision_trace import get_trace_view
+
+    view = get_trace_view(trace_id)
+    if view is None:
+        return JSONResponse(status_code=200, content={
+            "status": "error",
+            "errors": [{
+                "code": "DATA_NOT_FOUND",
+                "message": f"找不到決策軌跡 {trace_id}（軌跡存在記憶體，伺服器重啟後即消失）",
+            }],
+        })
+
+    return JSONResponse(content={
+        "status": "ok",
+        "message_type": "trace.view.v1",
+        "payload": view,
+    })
 
 
 @app.post("/api/reset")

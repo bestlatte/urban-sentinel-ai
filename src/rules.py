@@ -92,18 +92,40 @@ def determine_level(rule_hits: list[RuleHit], saturation_score: float | None = N
     return max_level
 
 
-def evaluate_rules(bundle: NormalizedDataBundle, incident: Incident | None = None) -> SensingResult:
+def evaluate_rules(
+    bundle: NormalizedDataBundle,
+    incident: Incident | None = None,
+    as_of: datetime | None = None,
+) -> SensingResult:
     """P4：SOP 規則引擎，門檻→條款→動作。彙整 P1-P3 的查詢結果與 P5 的等級判定。
 
-    使用 incident.timestamp 作為 as_of；若無 incident 則使用 bundle 中最新 timestamp。
+    評估時間優先序：明確傳入的 `as_of` > `incident.timestamp` > bundle 最新時間戳。
+
+    [2026-08-01 新增 `as_of` 參數]
+    -----------------------------
+    原本只有前兩段，「無 incident 就用資料集最晚時間」這個預設值從來沒有人
+    刻意選過，它只是「總得挑一個」的產物。實測發現它會造成很難理解的結果：
+
+        使用者在畫面上看 22:10 的事故，開對話框問「如果市民大道四段封閉…」
+        → 前端沒帶 current_trace_id → incident=None
+        → as_of 跳到 23:30（資料集最後一筆）
+        → 那個時刻 15 條路段有 10 條 ≥0.85
+        → 畫面顯示「命中 15 條」
+
+    那 15 條跟使用者的假設**完全無關**，是系統挑了一個跟畫面上差 80 分鐘的
+    時間點去掃全市。使用者看到的是一堆無法解釋的命中。
+
+    有了這個參數，呼叫端就能傳「使用者現在正在看的時間」（模擬器時間、
+    事故時間），而不是被迫接受一個隱藏的預設值。
     """
     # 決定 as_of 時間
-    if incident is not None:
-        as_of = incident.timestamp
-    else:
-        # 取 bundle 中所有時間戳的最大值
-        timestamps = [t.timestamp for t in bundle.traffic] + [c.timestamp for c in bundle.crowd]
-        as_of = max(timestamps) if timestamps else bundle.loaded_at
+    if as_of is None:
+        if incident is not None:
+            as_of = incident.timestamp
+        else:
+            # 取 bundle 中所有時間戳的最大值
+            timestamps = [t.timestamp for t in bundle.traffic] + [c.timestamp for c in bundle.crowd]
+            as_of = max(timestamps) if timestamps else bundle.loaded_at
 
     rule_hits: list[RuleHit] = []
     multilingual_required = False
