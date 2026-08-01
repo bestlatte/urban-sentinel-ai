@@ -27,10 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (data.traffic_samples) {
       updateChartData(data.traffic_samples);
-      // 更新飽和地圖（顯示各路段即時狀態），但不自動加入警報列表
-      if (typeof updateSaturationFromSamples === "function") {
-        updateSaturationFromSamples(data.traffic_samples);
-      }
+      // 初始載入不餵飽和度給地圖，等事件注入或模擬器啟動後才顯示
     }
   } catch (e) {
     console.warn("初始 Dashboard 載入失敗:", e);
@@ -108,11 +105,21 @@ function switchPage(pageName) {
   if (pageName === "reports") {
     renderReportsEventList();
   }
+  
+  // 切換到 Incident Monitor 頁面時，渲染監控卡片
+  if (pageName === "incidents") {
+    renderIncidentMonitor();
+  }
 }
 
 // --- F1 KPI ---
 const _injectedEventNames = new Map();
 let _activeIncidentCount = 0;
+let _levelACounts = 0;
+let _levelBCounts = 0;
+let _severityCritical = 0;
+let _severityHigh = 0;
+let _severityMedium = 0;
 
 function _formatInjectedEventName(incident) {
   if (!incident) return "未知事件";
@@ -124,10 +131,12 @@ function _renderInjectedEventsKpi() {
   const card = document.querySelector('.kpi-card[data-kpi="latest_injected_event"]');
   if (!card) return;
   const names = [..._injectedEventNames.values()];
-  const content = names.length
-    ? names.map((name) => `<div class="kpi-event-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>`).join("")
-    : '<div class="kpi-event-empty">尚未注入</div>';
-  card.innerHTML = `<div class="kpi-value kpi-event-list">${content}</div><div class="kpi-label">事件注入名稱</div>`;
+  if (names.length === 0) {
+    card.innerHTML = `<div class="kpi-value kpi-event-list"><div class="kpi-event-empty">尚未注入</div></div><div class="kpi-label">當前事件</div>`;
+    return;
+  }
+  const latest = names[names.length - 1];
+  card.innerHTML = `<div class="kpi-value" style="font-size:0.78rem;line-height:1.35;font-weight:600" title="${escapeHtml(latest)}">${escapeHtml(latest)}</div><div class="kpi-label">當前事件</div>`;
 }
 
 function _recordInjectedEvent(decision) {
@@ -142,7 +151,6 @@ function renderKpis(kpis) {
   if (!kpis) return;
   const values = [
     { key: "active_incident_count", label: "進行中事件", value: _activeIncidentCount },
-    { key: "current_level", label: "最高應變等級", value: kpis.current_level || "正常" },
   ];
 
   values.forEach(({ key, label, value }) => {
@@ -150,9 +158,18 @@ function renderKpis(kpis) {
     if (card) card.innerHTML = `<div class="kpi-value" title="${escapeHtml(String(value))}">${escapeHtml(String(value))}</div><div class="kpi-label">${label}</div>`;
   });
   _renderInjectedEventsKpi();
+  _renderLevelKpi();
 }
 
-// --- Dashboard 整合渲染 ---
+function _renderLevelKpi() {
+  const card = document.querySelector('.kpi-card[data-kpi="current_level"]');
+  if (!card) return;
+  card.innerHTML = `<div class="kpi-value" style="font-size:0.85rem;line-height:1.6">
+    <span style="color:var(--level-a);font-weight:700">${_severityCritical} Critical</span><br>
+    <span style="color:var(--level-b);font-weight:700">${_severityHigh} High</span><br>
+    <span style="color:hsl(45,93%,40%);font-weight:700">${_severityMedium} Medium</span>
+  </div><div class="kpi-label">事件嚴重度分佈</div>`;
+}
 function renderDashboard(payload) {
   renderKpis(payload.kpis);
   // [已移除] 進行中事件列表 - 事件狀態由 Event Injection 面板顯示
@@ -225,17 +242,18 @@ function onDecisionCompleted(decision) {
     _activeIncidentCount += 1;
     countCard.innerHTML = `<div class="kpi-value">${_activeIncidentCount}</div><div class="kpi-label">進行中事件</div>`;
   }
-  // 更新等級 KPI
-  if (decision.level) {
-    const levelCard = document.querySelector('.kpi-card[data-kpi="current_level"]');
-    if (levelCard) {
-      const color = decision.level === "A" ? "var(--level-a)" : "var(--level-b)";
-      levelCard.innerHTML = `<div class="kpi-value" style="color:${color}">${decision.level}</div><div class="kpi-label">最高應變等級</div>`;
-    }
-  }
+  // 更新等級 KPI（依事件嚴重度）
+  const severity = decision.incident?.severity;
+  if (severity === "Critical") _severityCritical++;
+  else if (severity === "High") _severityHigh++;
+  else if (severity === "Medium") _severityMedium++;
+  _renderLevelKpi();
   
   // 更新 Reports 頁面列表（如果在該頁面）
   _updateReportsOnNewDecision();
+  
+  // 更新 Incident Monitor 頁面卡片
+  renderIncidentMonitor();
 }
 
 // ★ 判斷兩個 routes 是否有變化（用於識別 cascade replan 更新）
@@ -285,6 +303,9 @@ function _handleReplanDecisionUpdate(decision, eventId) {
   
   // 記錄到 Activity Log
   _appendReplanUpdateToActivity(eventId, decision);
+  
+  // 更新 Incident Monitor 頁面卡片
+  renderIncidentMonitor();
 }
 
 // ★ 將 cascade replan 記錄到 Activity Log
@@ -440,12 +461,7 @@ function selectIncidentFromList(eventId) {
 
 function onRulesEvaluated(sensing) {
   if (!sensing) return;
-  // 更新 KPI：最高應變等級
-  const levelCard = document.querySelector('.kpi-card[data-kpi="current_level"]');
-  if (levelCard && sensing.traffic_level) {
-    const displayLevel = sensing.traffic_level === "normal" ? "正常" : sensing.traffic_level;
-    levelCard.innerHTML = `<div class="kpi-value">${displayLevel}</div><div class="kpi-label">最高應變等級</div>`;
-  }
+  // 等級 KPI 改由 _renderLevelKpi 統一管理，rules.evaluated 不覆蓋
   // 更新 KPI：多語通報站點（從 rule_hits 計算 SOP-6 命中數）
   // 更新飽和地圖資料（從 segment_snapshots 或 traffic_samples）
   if (sensing.segment_snapshots && typeof updateSaturationFromSamples === "function") {
@@ -722,12 +738,18 @@ async function _doResetSystem(showAlert = true) {
       _injectedEventIds.clear();
       _injectedEventNames.clear();
       _activeIncidentCount = 0;
+      _levelACounts = 0;
+      _levelBCounts = 0;
+      _severityCritical = 0;
+      _severityHigh = 0;
+      _severityMedium = 0;
       _renderInjectedEventsKpi();
       _allDecisions.clear();
       _activityByEvent.clear();
       _processedTraceIds.clear();
       _currentEventId = null;
       _selectedActivityEventId = null;
+      _updateReportsBadge();
       _lastInjectedEventId = null;
       
       console.log("[_doResetSystem] 清空後 _activityByEvent.size =", _activityByEvent.size);
@@ -1621,8 +1643,9 @@ function updateSimUI() {
     statusEl?.classList.toggle("playing", SimState.playing);
     statusText.textContent = SimState.playing ? "播放中" : "已暫停";
     
-    startBtn.textContent = "停止模擬";
-    startBtn.classList.add("primary");
+    startBtn.textContent = "⏹";
+    startBtn.title = "停止模擬";
+    startBtn.classList.add("active");
     playBtn.disabled = SimState.playing;
     pauseBtn.disabled = !SimState.playing;
     resetBtn.disabled = false;
@@ -1636,8 +1659,9 @@ function updateSimUI() {
     statusEl?.classList.remove("active", "playing");
     statusText.textContent = "未啟動";
     
-    startBtn.textContent = "啟動模擬";
-    startBtn.classList.remove("primary");
+    startBtn.textContent = "⏺";
+    startBtn.title = "啟動模擬";
+    startBtn.classList.remove("active");
     playBtn.disabled = true;
     pauseBtn.disabled = true;
     resetBtn.disabled = true;
@@ -2146,17 +2170,17 @@ function _showNoFeasibleRouteAlert(payload) {
   const alertId = `alert-nofeasible-${++alertCounter}`;
   
   const alertEl = document.createElement("div");
-  alertEl.className = "alert-item level-critical";
+  alertEl.className = "alert-item level-medium";
   alertEl.id = alertId;
-  alertEl.style.cssText = "border-left-color: hsl(0,85%,50%); background: linear-gradient(135deg, hsla(0,85%,30%,0.4), hsla(0,85%,40%,0.2)); animation: alertPulse 1s ease-in-out infinite;";
+  alertEl.style.cssText = "border-left-color: hsl(45,93%,47%); background: #F9F0D4;";
   alertEl.innerHTML = `
     <div class="alert-item-header">
-      <span class="alert-item-level" style="color:hsl(0,85%,60%);font-weight:700">⚠️ 嚴重警告</span>
+      <span class="alert-item-level" style="color:hsl(45,80%,30%);font-weight:700">⚠️ 嚴重警告</span>
     </div>
-    <div class="alert-item-road" style="color:hsl(0,85%,70%);font-size:0.9rem;font-weight:600">無可用替代路線</div>
-    <div class="alert-item-desc">${escapeHtml(payload.description)}</div>
-    <div class="alert-item-extra" style="color:hsl(0,70%,70%);font-weight:500">請立即啟動人工指揮或封閉區域</div>
-    <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')" style="background:hsl(0,70%,40%)">確認</button>
+    <div class="alert-item-road" style="color:#34271D;font-size:0.9rem;font-weight:700">無可用替代路線</div>
+    <div class="alert-item-desc" style="color:#4a3728;font-weight:500">${escapeHtml(payload.description)}</div>
+    <div class="alert-item-extra" style="color:#665244;font-weight:600">請立即啟動人工指揮或封閉區域</div>
+    <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')" style="background:#34271D;color:#F9F0D4;font-weight:600">確認</button>
   `;
   
   stack.appendChild(alertEl);
@@ -2584,4 +2608,156 @@ function _updateReportsOnNewDecision() {
   if (reportsPage && !reportsPage.hidden) {
     renderReportsEventList();
   }
+  _updateReportsBadge();
+}
+
+function _updateReportsBadge() {
+  const count = _allDecisions.size;
+  const dot = document.getElementById("nav-notify-dot");
+  const badge = document.getElementById("nav-reports-badge");
+  if (dot) dot.hidden = count === 0;
+  if (badge) {
+    badge.hidden = count === 0;
+    badge.textContent = count;
+  }
+}
+
+
+// ========== Incident Monitor 頁面邏輯 ==========
+
+/** 已解除事件 ID 集合（前端狀態，不影響後端） */
+const _clearedIncidents = new Set();
+
+/** 篩選器：'all' | 'active' | 'cleared' */
+let _incidentFilter = "all";
+
+/**
+ * 設定篩選器並重繪
+ * @param {'all' | 'active' | 'cleared'} filter
+ */
+function setIncidentFilter(filter) {
+  _incidentFilter = filter;
+  document.querySelectorAll(".incidents-filter-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.filter === filter);
+  });
+  renderIncidentMonitor();
+}
+
+/**
+ * 渲染 Incident Monitor 卡片列表（Task 2 會填入完整邏輯）
+ */
+function renderIncidentMonitor() {
+  const grid = document.getElementById("incidents-grid");
+  if (!grid) return;
+
+  // 統計用
+  let totalCount = 0;
+  let activeCount = 0;
+  let clearedCount = 0;
+
+  // 篩選並收集要顯示的 entries
+  const entries = [];
+  for (const [eventId, decision] of _allDecisions) {
+    totalCount++;
+    const isCleared = _clearedIncidents.has(eventId);
+    if (isCleared) clearedCount++;
+    else activeCount++;
+
+    if (_incidentFilter === "active" && isCleared) continue;
+    if (_incidentFilter === "cleared" && !isCleared) continue;
+    entries.push({ eventId, decision, isCleared });
+  }
+
+  // 更新篩選 tab 計數
+  const countAll = document.getElementById("filter-count-all");
+  const countActive = document.getElementById("filter-count-active");
+  const countCleared = document.getElementById("filter-count-cleared");
+  if (countAll) countAll.textContent = totalCount;
+  if (countActive) countActive.textContent = activeCount;
+  if (countCleared) countCleared.textContent = clearedCount;
+
+  if (entries.length === 0) {
+    grid.innerHTML = '<div class="incidents-empty">尚無事件</div>';
+    return;
+  }
+
+  // 渲染卡片（Task 2 會完善樣式）
+  let html = "";
+  for (const { eventId, decision, isCleared } of entries) {
+    html += _renderIncidentCard(eventId, decision, isCleared);
+  }
+  grid.innerHTML = html;
+}
+
+/**
+ * 產生單張事件卡片 HTML（Task 2 會補齊欄位與樣式）
+ */
+function _renderIncidentCard(eventId, decision, isCleared) {
+  const incident = decision.incident || {};
+  const level = decision.level || "";
+  const levelClass = level ? `level-${level.toLowerCase()}` : "";
+  const clearedClass = isCleared ? "cleared" : "";
+  const statusLabel = isCleared ? "已解除" : "進行中";
+  const toggleBtnText = isCleared ? "復原" : "解除事件";
+
+  const description = incident.description || incident.type || eventId;
+  const location = incident.location || "—";
+  const eteMinutes = decision.ete?.minutes ?? "—";
+  const recoveryAt = decision.ete?.recovery_at || "—";
+  const primaryRoute = decision.routes?.primary?.segment_id || "—";
+  const primaryName = decision.routes?.primary?.name || "";
+  const secondaryRoute = decision.routes?.secondary?.segment_id || "—";
+  const secondaryName = decision.routes?.secondary?.name || "";
+  const timestamp = incident.timestamp || "—";
+
+  return `
+    <div class="incident-card ${levelClass} ${clearedClass}" data-event-id="${escapeHtml(eventId)}">
+      <div class="incident-card-header">
+        <span class="incident-status-badge ${isCleared ? 'cleared' : 'active'}">${statusLabel}</span>
+        ${level ? `<span class="incident-level-badge ${levelClass}">${level} 級</span>` : ""}
+      </div>
+      <div class="incident-card-title">${escapeHtml(description)}</div>
+      <div class="incident-card-location">${escapeHtml(location)}</div>
+      <div class="incident-card-metrics">
+        <div class="incident-metric"><span class="metric-label">ETE</span><span class="metric-value">${escapeHtml(String(eteMinutes))} 分</span></div>
+        <div class="incident-metric"><span class="metric-label">預估恢復</span><span class="metric-value">${escapeHtml(recoveryAt)}</span></div>
+      </div>
+      <div class="incident-card-routes">
+        <div class="route-item primary"><span class="route-label">主線</span><span class="route-value">${escapeHtml(primaryRoute)}${primaryName ? ` (${escapeHtml(primaryName)})` : ""}</span></div>
+        <div class="route-item secondary"><span class="route-label">次線</span><span class="route-value">${escapeHtml(secondaryRoute)}${secondaryName ? ` (${escapeHtml(secondaryName)})` : ""}</span></div>
+      </div>
+      <div class="incident-card-meta">
+        <span class="meta-event-id">${escapeHtml(eventId)}</span>
+        <span class="meta-timestamp">${escapeHtml(timestamp)}</span>
+      </div>
+      <div class="incident-card-actions">
+        <button class="incident-btn toggle-clear" onclick="toggleClearIncident('${escapeHtml(eventId)}')">${toggleBtnText}</button>
+        <button class="incident-btn delete" onclick="deleteIncident('${escapeHtml(eventId)}')">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 切換事件解除狀態
+ */
+function toggleClearIncident(eventId) {
+  if (_clearedIncidents.has(eventId)) {
+    _clearedIncidents.delete(eventId);
+  } else {
+    _clearedIncidents.add(eventId);
+  }
+  renderIncidentMonitor();
+}
+
+/**
+ * 刪除事件（從 _allDecisions 移除）
+ */
+function deleteIncident(eventId) {
+  if (!confirm(`確定要刪除事件「${eventId}」嗎？此操作無法復原。`)) return;
+  _allDecisions.delete(eventId);
+  _clearedIncidents.delete(eventId);
+  renderIncidentMonitor();
+  // 同步更新 Reports 頁
+  renderReportsEventList();
 }

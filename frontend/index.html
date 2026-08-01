@@ -15,7 +15,7 @@
   <link rel="stylesheet" href="/frontend/css/chat-input.css" />
   <link rel="stylesheet" href="/frontend/css/chat-loading.css" />
   <style>
-    #f4-geomap { height: 440px; border-radius: 10px; overflow: hidden; background: #F3E8D7; }
+    #f4-geomap { height: 480px; border-radius: 10px; overflow: hidden; background: #F3E8D7; }
     .map-tabs button { padding: 5px 14px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; font-size: 0.72rem; font-family: var(--font); cursor: pointer; transition: all 0.15s; }
     .map-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
     .map-tabs button:not(.active):hover { background: var(--bg-elevated); color: var(--text); }
@@ -45,6 +45,7 @@
   <aside class="right-side-nav" aria-label="主要頁面導覽">
     <button class="right-side-nav-toggle" type="button" onclick="toggleRightSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
       <span>›</span>
+      <span class="nav-notify-dot" id="nav-notify-dot" hidden></span>
     </button>
     <div class="side-nav-title">Workspace</div>
     <nav class="page-nav" id="page-nav">
@@ -63,6 +64,11 @@
       <button class="page-nav-btn" data-page="reports" onclick="switchPage('reports')" title="Reports">
         <span class="page-nav-icon">📄</span>
         <span class="page-nav-label">Reports</span>
+        <span class="nav-badge" id="nav-reports-badge" hidden>0</span>
+      </button>
+      <button class="page-nav-btn" data-page="incidents" onclick="switchPage('incidents')" title="Incident Monitor">
+        <span class="page-nav-icon">🚨</span>
+        <span class="page-nav-label">Incident Monitor</span>
       </button>
     </nav>
     <div class="side-nav-footer">
@@ -105,40 +111,7 @@
 
       <!-- Right Column -->
       <div class="col-right">
-        <!-- Time Simulation Control -->
-        <section class="section card" id="simulation-panel">
-          <div class="section-header">Time Simulation</div>
-          <div class="sim-status" id="sim-status">
-            <span class="sim-status-dot"></span>
-            <span class="sim-status-text">未啟動</span>
-          </div>
-          <div class="sim-time-display">
-            <div class="sim-time-label">模擬時間</div>
-            <div class="sim-time-value" id="sim-current-time">--:--</div>
-          </div>
-          <div class="sim-timeline">
-            <input type="range" id="sim-slider" min="0" max="100" value="0" disabled>
-            <div class="sim-timeline-labels">
-              <span id="sim-start-time">17:00</span>
-              <span id="sim-end-time">23:30</span>
-            </div>
-          </div>
-          <div class="sim-controls">
-            <button id="sim-start-btn" class="sim-btn" onclick="simStart()">啟動模擬</button>
-            <button id="sim-play-btn" class="sim-btn" onclick="simPlay()" disabled>▶ 播放</button>
-            <button id="sim-pause-btn" class="sim-btn" onclick="simPause()" disabled>⏸ 暫停</button>
-            <button id="sim-reset-btn" class="sim-btn" onclick="simReset()" disabled>⏪ 重置</button>
-          </div>
-          <div class="sim-speed">
-            <label>播放速度：</label>
-            <select id="sim-speed-select">
-              <option value="30">1秒 = 30秒</option>
-              <option value="60" selected>1秒 = 1分鐘</option>
-              <option value="300">1秒 = 5分鐘</option>
-              <option value="600">1秒 = 10分鐘</option>
-            </select>
-          </div>
-        </section>
+        <!-- Time Simulation Control（已移至浮動面板） -->
 
         <!-- Event Injection -->
         <section class="section card" id="f3-inject">
@@ -249,6 +222,23 @@
     </div>
   </div>
 
+  <!-- Page: Incident Monitor (事件監控頁) -->
+  <div class="page-content" id="page-incidents" hidden>
+    <div class="incidents-page-layout">
+      <header class="incidents-header">
+        <h2 class="incidents-title">Incident Monitor</h2>
+        <nav class="incidents-filter-tabs">
+          <button class="incidents-filter-btn active" data-filter="all" onclick="setIncidentFilter('all')">全部 <span class="filter-count" id="filter-count-all">0</span></button>
+          <button class="incidents-filter-btn" data-filter="active" onclick="setIncidentFilter('active')">進行中 <span class="filter-count" id="filter-count-active">0</span></button>
+          <button class="incidents-filter-btn" data-filter="cleared" onclick="setIncidentFilter('cleared')">已解除 <span class="filter-count" id="filter-count-cleared">0</span></button>
+        </nav>
+      </header>
+      <div class="incidents-grid" id="incidents-grid">
+        <div class="incidents-empty">尚無事件</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Alert Modal -->
   <div id="f2-alert-modal" hidden></div>
 
@@ -289,6 +279,30 @@
   <script src="/frontend/js/charts.js?v=chart-axis-visible-5"></script>
   <script src="/frontend/js/map.js"></script>
   <script src="/frontend/js/geomap.js"></script>
+  <!-- 浮動模擬器面板（一行式） -->
+  <div id="simulation-panel" class="sim-floating-panel">
+    <div class="sim-floating-row">
+      <span class="sim-floating-label">時間模擬器</span>
+      <button id="sim-start-btn" class="sim-icon-btn" onclick="simStart()" title="停止模擬">⏹</button>
+      <button id="sim-play-btn" class="sim-icon-btn" onclick="simPlay()" disabled title="播放">▶</button>
+      <button id="sim-pause-btn" class="sim-icon-btn" onclick="simPause()" disabled title="暫停">⏸</button>
+      <button id="sim-reset-btn" class="sim-icon-btn" onclick="simReset()" disabled title="重置">⏪</button>
+      <div class="sim-floating-slider">
+        <input type="range" id="sim-slider" min="0" max="100" value="0" disabled>
+      </div>
+      <span class="sim-floating-time" id="sim-current-time">--:--</span>
+      <span class="sim-floating-separator">/</span>
+      <span class="sim-floating-end" id="sim-end-time">23:30</span>
+      <span class="sim-floating-speed-label">1 分鐘/秒</span>
+      <select id="sim-speed-select" style="display:none"><option value="60" selected>60</option></select>
+    </div>
+    <div class="sim-status" id="sim-status" style="display:none">
+      <span class="sim-status-dot"></span>
+      <span class="sim-status-text">未啟動</span>
+    </div>
+    <span id="sim-start-time" style="display:none">17:00</span>
+  </div>
+
   <script src="/frontend/js/chat-app.js"></script>
   <script src="/frontend/js/app.js?v=collapsible-right-sidebar-10"></script>
 </body>

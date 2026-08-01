@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "citynexus-backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "USE_STUB_MODULES=false USE_BEDROCK=false uvicorn main:app --reload --port 8000"
+      ],
+      "port": 8000
+    }
+  ]
+}

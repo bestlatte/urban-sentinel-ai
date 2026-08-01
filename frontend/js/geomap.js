@@ -44,7 +44,7 @@ const GEO_SVG = `
   <line id="road-003" x1="1440" y1="120" x2="970" y2="600" fill="none" stroke="#b0b0b0" stroke-width="11" stroke-linecap="round"/>
   <line id="road-010" x1="1120" y1="485" x2="1125" y2="600" fill="none" stroke="#b0b0b0" stroke-width="10" stroke-linecap="round"/>
   <path id="road-014" d="M 1220 442 L 1222 600 L 1200 660 L 1230 685" fill="none" stroke="#b0b0b0" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
-  <line id="road-009" x1="970" y1="600" x2="900" y2="705" fill="none" stroke="#b0b0b0" stroke-width="7" stroke-linecap="round" stroke-dasharray="12,7"/>
+  <line id="road-009" x1="970" y1="600" x2="900" y2="705" fill="none" stroke="#b0b0b0" stroke-width="10" stroke-linecap="round"/>
 
   <!-- 節點：藍色空心圓（白色填充確保在路段上方可見） -->
   <g id="geo-nodes">
@@ -91,20 +91,20 @@ const GEO_SVG = `
   <text x="1080" y="632" fill="#4a3728" font-size="30" font-weight="500" font-family="-apple-system,Noto Sans TC,PingFang TC,sans-serif">市府路</text>
   <text x="1170" y="718" fill="#4a3728" font-size="30" font-weight="500" font-family="-apple-system,Noto Sans TC,PingFang TC,sans-serif">松智路</text>
 
-  <!-- 圖例 -->
-  <g transform="translate(420,910)">
-    <rect x="-20" y="-28" width="600" height="60" rx="8" fill="#F3E8D7" stroke="#B78E62" stroke-width="1.5"/>
-    <line x1="0" y1="0" x2="40" y2="0" stroke="#f97316" stroke-width="10" stroke-linecap="round"/><text x="50" y="7" fill="#333" font-size="24" font-weight="600" font-family="-apple-system,Noto Sans TC,sans-serif">主要</text>
-    <line x1="135" y1="0" x2="175" y2="0" stroke="#22c55e" stroke-width="10" stroke-linecap="round"/><text x="185" y="7" fill="#333" font-size="24" font-weight="600" font-family="-apple-system,Noto Sans TC,sans-serif">次要</text>
-    <line x1="270" y1="0" x2="310" y2="0" stroke="#dc2626" stroke-width="10" stroke-linecap="round"/><text x="320" y="7" fill="#333" font-size="24" font-weight="600" font-family="-apple-system,Noto Sans TC,sans-serif">封閉</text>
-    <line x1="405" y1="0" x2="445" y2="0" stroke="#c0b0a0" stroke-width="10" stroke-linecap="round" stroke-dasharray="10,14"/><text x="455" y="7" fill="#333" font-size="24" font-weight="600" font-family="-apple-system,Noto Sans TC,sans-serif">排除</text>
-  </g>
 </svg>`;
 
 function initGeoMap() {
   const container = document.getElementById("f4-geomap");
   if (!container) return;
-  container.innerHTML = GEO_SVG;
+  container.style.position = "relative";
+  const legend = `<div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:18px;font-size:0.82rem;color:var(--text-secondary,#34271D);background:var(--bg-card,#F3E8D7);border:1px solid var(--border,#B78E62);border-radius:8px;padding:8px 20px;font-weight:500;">
+    <span><span style="color:hsl(142,71%,45%);font-size:1rem">●</span> 主線</span>
+    <span><span style="color:hsl(48,96%,53%);font-size:1rem">●</span> 次線</span>
+    <span><span style="color:hsl(0,84%,60%);font-size:1rem">●</span> 封閉</span>
+    <span><span style="color:#c0b0a0;font-size:1rem;letter-spacing:-2px">╍</span> 排除</span>
+    <span><span style="color:hsl(0,0%,30%);font-size:1rem">●</span> 一般</span>
+  </div>`;
+  container.innerHTML = GEO_SVG + legend;
 }
 
 /**
@@ -153,12 +153,12 @@ function updateGeoMap(routes) {
 
   if (routes.secondary) {
     const el = document.getElementById(SEG_IDS[routes.secondary.segment_id]);
-    if (el) { el.setAttribute("stroke", "#22c55e"); el.setAttribute("stroke-width", "14"); }
+    if (el) { el.setAttribute("stroke", "hsl(48,96%,53%)"); el.setAttribute("stroke-width", "14"); }
   }
 
   if (routes.primary) {
     const el = document.getElementById(SEG_IDS[routes.primary.segment_id]);
-    if (el) { el.setAttribute("stroke", "#f97316"); el.setAttribute("stroke-width", "14"); }
+    if (el) { el.setAttribute("stroke", "hsl(142,71%,45%)"); el.setAttribute("stroke-width", "14"); }
   }
 
   // 確保節點圓圈在最上層
