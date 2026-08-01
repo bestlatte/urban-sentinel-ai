@@ -666,7 +666,7 @@ async def get_dashboard():
     payload = DashboardPayload(
         kpis=kpis,
         active_incidents=active_incident_models,
-        as_of=now,
+        as_of=as_of,
     )
 
     return JSONResponse(content={
