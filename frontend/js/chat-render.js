@@ -14,13 +14,25 @@ function renderUserMessage(text) {
   const html = `
     <div class="msg msg-user">
       <div class="msg-bubble">${escapeHtml(text)}</div>
-      <div class="msg-time">${formatTime(new Date().toISOString())}</div>
+      <div class="msg-time">${formatTime(nowSimAwareISO())}</div>
     </div>`;
   appendToMessages(html);
 }
 
-/** 這些 intent 只有文字回覆，沒有可畫的結構化資料，不要生一張空卡片。 */
-const _CARDLESS_INTENTS = new Set(["chitchat", "trace_answer", "error"]);
+/** 這些 intent 沒有工具結果可畫，硬畫 `renderDecisionCard()` 只會生出一張
+ *  只有標題的空殼。`report_followup` 也在內——它答得完整，但那份完整來自
+ *  事實區塊而不是工具回傳，卡片裡該填的欄位一個都沒有。 */
+const _CARDLESS_INTENTS = new Set([
+  "chitchat", "trace_answer", "error", "report_followup",
+]);
+
+/** 這些 intent 連附件（後續風險推演時間軸）都不該有。
+ *
+ *  跟 `_CARDLESS_INTENTS` 差在 `report_followup`：「這起事件該怎麼處理」
+ *  沒有卡片可畫，但那張推演圖正是使用者要的答案。
+ *
+ *  後端 `orchestrator._STRUCTURED_INTENTS` 是同一條線的另一側。 */
+const _ATTACHMENTLESS_INTENTS = new Set(["chitchat", "trace_answer", "error"]);
 
 function renderAIResponse(data) {
   let html = `<div class="msg msg-ai">`;
@@ -29,28 +41,40 @@ function renderAIResponse(data) {
   // 內部一樣會先逃逸再套語法，安全性不變。
   html += `<div class="msg-bubble md">${renderMarkdown(data.summary || "")}</div>`;
 
+  // [2026-08-02] 所有結構化區塊（決策卡片、後續風險推演）共用同一道守衛。
+  //
+  // 原本風險時間軸畫在守衛**外面**，判斷只有「後端有沒有帶 projected_risks」——
+  // 而後端 `_attach_trace()` 是無條件掛的。結果使用者問「你是誰」，回覆下面
+  // 跟著一張後續風險推演時間軸。閒聊本來就沒有情境可推演，那張圖講的是別的
+  // 事件，出現在這裡只會讓人以為系統把問題聽成別的東西了。
+  //
+  // 後端那側也已經改成依 intent 過濾（見 `orchestrator._attach_trace()`），
+  // 這裡是第二道保險——payload 從哪條路徑來都不會漏。
   if (data.intent_type && !_CARDLESS_INTENTS.has(data.intent_type)) {
     html += renderDecisionCard(data);
   }
 
   // 後續風險推演時間軸（若後端有帶）。跟 Dashboard 用同一支渲染函式，
   // 兩處看到的圖必然一致。
-  if (typeof renderRiskTimeline === "function" && data.projected_risks) {
+  if (
+    data.intent_type &&
+    !_ATTACHMENTLESS_INTENTS.has(data.intent_type) &&
+    typeof renderRiskTimeline === "function" &&
+    data.projected_risks
+  ) {
     html += renderRiskTimeline(data.projected_risks);
   }
 
-  // 決策軌跡獨立於卡片之外渲染。
+  // [2026-08-02 移除決策軌跡] 對話框裡不再顯示決策軌跡。
   //
-  // [2026-08-01] 回溯追問（trace_answer）在 _CARDLESS_INTENTS 裡不畫卡片——
-  // 它沒有 What-if 重算結果，硬畫會生出一張空殼。但它**最需要**顯示軌跡：
-  // 「延吉街為什麼不能走」問的就是當初實際跑了哪些步驟。所以軌跡放在卡片外面，
-  // 只要後端帶了 trace_steps 就畫。
-  if (typeof renderDecisionTrace === "function") {
-    html += renderDecisionTrace(data.trace_steps);
-  }
+  // 它原本畫在這裡（卡片之外，只要後端帶了 `trace_steps` 就畫），但那份軌跡
+  // 是稽核資料——誰在第幾步呼叫了什麼工具、耗時幾毫秒。在幾百像素寬的側邊
+  // 對話框裡，它把真正的答案往下擠了一整屏，而指揮官要的是可以立刻行動的
+  // 結論。決策的「為什麼」在 Report 頁的「決策推理過程」講得完整得多
+  // （`decision-reasoning.js`），那裡有版面、也有對照的原始依據。
 
   html += renderSuggestedQuestions(data.suggested_questions);
-  html += `<div class="msg-time">${formatTime(new Date().toISOString())}</div>`;
+  html += `<div class="msg-time">${formatTime(nowSimAwareISO())}</div>`;
   html += `</div>`;
   appendToMessages(html);
 }
@@ -166,11 +190,41 @@ function sendQuickQuestion(btn) {
   if (typeof sendMessage === "function") sendMessage(text);
 }
 
+/**
+ * 思考中的步驟文字。
+ *
+ * [2026-08-02] 原本這份清單在前後端各寫一次（`chat-app.js::sendMessage()` 的
+ * 呼叫端一份、`src/agent/loading.py::LOADING_STEPS` 一份），改一邊另一邊不會動。
+ * 前端這側統一從這裡取。
+ */
+const LOADING_STEPS = ["解析問題意圖", "檢索 SOP 條款", "呼叫決策模組", "計算 ETE", "組合回覆"];
+
+/**
+ * 畫出「思考中」的泡泡。
+ *
+ * [2026-08-02 修正：畫面上同時出現兩個思考 UI]
+ * ------------------------------------------
+ * 原本這支函式會被呼叫**兩次**：
+ *
+ *   1. `chat-app.js::sendMessage()` 本地先畫一個
+ *   2. 後端 `chat.loading_start.v1` 推播回來，`ws.js` 又畫一個
+ *      （那裡的守衛是 `correlation_id !== currentCorrelationId` 就 return，
+ *       也就是**相符時才畫**——而本地那次用的正是同一個 correlation_id）
+ *
+ * 兩個節點掛同一個 `id="loading-msg"`，`removeLoading()` 的 `getElementById`
+ * 只拿得到第一個，第二個就永遠留在對話串裡。
+ *
+ * 現在改成冪等：已經有一個在跑就不再畫。本地渲染是唯一來源（REST 是同步的，
+ * 本地畫最即時，也不受 WS 斷線影響），WS 推播退化成純粹的保險。
+ */
 function renderLoadingStart(steps) {
-  const html = `<div class="msg msg-ai" id="loading-msg">
+  if (document.querySelector(".chat-loading-msg")) return;
+
+  const list = steps && steps.length ? steps : LOADING_STEPS;
+  const html = `<div class="msg msg-ai chat-loading-msg" id="loading-msg">
     <div class="loading-container">
       <div class="loading-dots"><span></span><span></span><span></span></div>
-      <div class="loading-steps">${steps.map((s, i) =>
+      <div class="loading-steps">${list.map((s, i) =>
         `<div class="loading-step${i === 0 ? " active" : ""}">${escapeHtml(s)}</div>`
       ).join("")}</div>
     </div>
@@ -178,7 +232,8 @@ function renderLoadingStart(steps) {
   appendToMessages(html);
 }
 
+/** 清掉所有思考中泡泡。用 querySelectorAll 而不是 getElementById——
+ *  萬一因為任何理由殘留了第二個，這裡要能一併收乾淨。 */
 function removeLoading() {
-  const el = document.getElementById("loading-msg");
-  if (el) el.remove();
+  document.querySelectorAll(".chat-loading-msg").forEach(el => el.remove());
 }

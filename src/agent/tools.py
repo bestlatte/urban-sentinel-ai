@@ -126,21 +126,24 @@ def simulate_scenario(assumptions: dict, question: str) -> dict:
 def _get_current_context():
     """回傳 (目前作用中的 Incident | None, 目前的 NormalizedDataBundle)。
 
-    見 `simulate_scenario` docstring 對 trace_id 為 None 情境的說明。
+    [2026-08-02] 改走 `whatif_agent._current_incident_record()`，跟事實區塊
+    用**同一份**決策週期。
+
+    原本這裡自己解析一次 trace_id：對不上就 `incident=None`，於是
+    `run_scenario()` 拿不到事故，路線與 ETE 整個算不出來——而事實區塊那邊可能
+    正好解析得到，兩者講的是不同的世界。兩處各寫一份解析邏輯，本來就注定會漂移。
+
+    真的沒有任何進行中事件時 `incident` 仍是 None，那是合理的功能邊界
+    （見 `simulate_scenario` docstring）：`run_scenario` 會依問題合成假想事故，
+    或只填 rule_hits。
     """
     from src import orchestrator
+    from src.agent.whatif_agent import _current_incident_record
 
-    trace_id = orchestrator._current_trace_ctx.get()
-    state = orchestrator.get_global_state()
+    record = _current_incident_record()
 
-    incident = None
-    bundle = None
-    if trace_id is not None:
-        for record in state.active_incidents.values():
-            if record.trace_id == trace_id:
-                incident = record.incident
-                bundle = record.bundle_snapshot
-                break
+    incident = record.incident if record is not None else None
+    bundle = record.bundle_snapshot if record is not None else None
 
     if bundle is None:
         bundle = orchestrator.GATEWAY.load_data()

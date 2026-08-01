@@ -277,70 +277,19 @@ function _renderDifferences(differences) {
 }
 
 /**
- * 決策軌跡時間軸。
+ * [2026-08-02 已移除：renderDecisionTrace()]
+ * ------------------------------------------
+ * 這裡原本有一支把後端 `trace_steps` 畫成時間軸的函式（誰在第幾步呼叫了什麼
+ * 工具、依據哪條 SOP、耗時幾毫秒）。整段連同 `.decision-trace / .tr-*` 樣式
+ * 一併拿掉，理由記在 `chat-render.js::renderAIResponse()`：
  *
- * [2026-08-01] 使用者反映「chatbot 的回答沒有顯示決策軌跡」。原因是軌跡從來
- * 沒有離開過後端記憶體——`decision_trace` 只被 M4B 生成層讀，`W1Response` 沒有
- * 對應欄位。後端補上 `trace_steps` 之後，這裡把它畫成時間軸。
+ *   軌跡是稽核資料，放在幾百像素寬的側邊對話框裡，會把真正的答案往下擠掉
+ *   一整屏。決策的「為什麼」在 Report 頁的「決策推理過程」講得完整得多
+ *   （`decision-reasoning.js`），那裡有版面也有對照的原始依據。
  *
- * 跟推理鏈的差別：推理鏈是「這個**假設情境**怎麼算出來的」（What-if 重算），
- * 軌跡是「**正式決策**當初實際跑了哪些步驟」（留痕）。兩者都要，因為使用者
- * 問的常常是後者——「為什麼延吉街不能走」問的是當初的判斷，不是假設。
- *
- * 預設摺疊：軌跡是稽核資料，需要時才展開，不該預設佔滿對話框。
+ * 後端 `decision_trace` 模組本身沒有動——M4B 生成層與 `/api/trace/{id}`
+ * 還在用，只是不再流進對話框。
  */
-function renderDecisionTrace(steps) {
-  if (!steps || steps.length === 0) return "";
-
-  let rows = "";
-  steps.forEach(step => {
-    const badges = [];
-    if (step.tool) badges.push(`<span class="tr-tool">${escapeHtml(step.tool)}</span>`);
-    if (step.sop_ref) badges.push(`<span class="tr-sop">${escapeHtml(step.sop_ref)}</span>`);
-    if (step.duration_ms != null) {
-      badges.push(`<span class="tr-ms">${escapeHtml(String(step.duration_ms))}ms</span>`);
-    }
-
-    // 輸出的純量欄位直接列出來——這些是後端算完寫進軌跡的數字，
-    // 是「依據什麼判斷」最直接的證據。
-    const outputs = [];
-    Object.entries(step.output || {}).forEach(([k, v]) => {
-      if (v === null || v === undefined || v === "") return;
-      if (typeof v === "object") return; // 巢狀結構留給下面的 excluded/findings
-      outputs.push(`${escapeHtml(k)}=<strong>${escapeHtml(String(v))}</strong>`);
-    });
-
-    let detail = "";
-    if (outputs.length) {
-      detail += `<div class="tr-output">${outputs.join("　")}</div>`;
-    }
-    (step.excluded || []).forEach(e => {
-      detail += `<div class="tr-excluded">✕ ${escapeHtml(e.segment_id)} — ${
-        escapeHtml(e.detail || e.reason_code)
-      }</div>`;
-    });
-    (step.findings || []).forEach(f => {
-      detail += `<div class="tr-finding">⚑ ${escapeHtml(f.finding_code)}${
-        f.segment_ids && f.segment_ids.length ? `（${f.segment_ids.map(escapeHtml).join("、")}）` : ""
-      }</div>`;
-    });
-
-    rows += `<div class="tr-step">
-      <div class="tr-step-head">
-        <span class="tr-seq">${escapeHtml(String(step.sequence_no))}</span>
-        <span class="tr-actor">${escapeHtml(step.agent_label || step.agent)}</span>
-        <span class="tr-action">${escapeHtml(step.action_label || step.action)}</span>
-        ${badges.join("")}
-      </div>
-      ${detail ? `<div class="tr-step-body">${detail}</div>` : ""}
-    </div>`;
-  });
-
-  return `<details class="decision-trace">
-    <summary>決策軌跡（${steps.length} 步）</summary>
-    <div class="tr-list">${rows}</div>
-  </details>`;
-}
 
 /**
  * 主入口：把整條推理鏈畫出來。

@@ -313,7 +313,7 @@ function _appendReplanUpdateToActivity(eventId, decision) {
   if (!_activityByEvent.has(eventId)) return;
   
   const eventData = _activityByEvent.get(eventId);
-  const time = formatTime(new Date().toISOString());
+  const time = formatTime(nowSimAwareISO());
   
   const primaryName = decision.routes?.primary?.name || decision.routes?.primary?.segment_id || "(無)";
   
@@ -1009,10 +1009,18 @@ function _renderReportContent(decision) {
     html += renderRiskTimeline(decision.projected_risks);
   }
 
-  // 建議書全文
+  // 建議書全文改放 Reports 頁，這裡只留一個入口。
+  //
+  // [2026-08-01] Dashboard 的 Advisory Report 原本把 500~600 字的全文整段塞進來，
+  // 上面的等級、ETE、路線、風險推演全被推到看不見的地方。這個區塊的作用是
+  // 「一眼看完這次決策的重點」，深入閱讀屬於 Reports 頁——那裡版面大、
+  // 有事件清單可以左右比對。
   if (decision.control_center_report) {
-    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin:14px 0 6px">FULL REPORT</div>`;
-    html += `<div class="md" style="font-size:0.75rem;line-height:1.7;color:var(--text-secondary)">${renderMarkdown(decision.control_center_report)}</div>`;
+    const eid = decision.incident?.event_id || decision.trace_id;
+    html += `<button class="report-jump-btn" onclick="openReportInReportsPage('${escapeHtml(eid)}')">
+      查看完整建議書
+      <span class="report-jump-hint">含多語通報、排除路段、決策依據</span>
+    </button>`;
   }
 
   // 元資訊
@@ -1071,8 +1079,13 @@ function _renderReportTabs() {
   let index = 1;
   for (const [eventId, dec] of _allDecisions) {
     const isActive = eventId === _currentEventId;
-    const levelColor = dec.level === "A" ? "#dc2626" : dec.level === "B" ? "#f97316" : "#666";
-    const levelBg = dec.level === "A" ? "#fef2f2" : dec.level === "B" ? "#fff7ed" : "#f5f5f5";
+    // [2026-08-01] 原本這兩行寫死 #fef2f2 / #fff7ed / #f5f5f5 / #666。
+    // 那是另一套配色的殘留，跟目前的米色主題（--bg-card: #F3E8D7）湊不起來，
+    // 選中的分頁會突然變成一塊近白底配灰字。改用主題變數，換主題就跟著換。
+    const levelColor = dec.level === "A" ? "var(--level-a)"
+      : dec.level === "B" ? "var(--level-b)" : "var(--text-muted)";
+    const levelBg = dec.level === "A" ? "hsla(0, 84%, 60%, 0.12)"
+      : dec.level === "B" ? "hsla(25, 95%, 53%, 0.12)" : "var(--bg-elevated)";
     
     // 取得事件名稱（短版）
     const typeName = _getShortType(dec.incident?.type) || "事件";
@@ -1125,6 +1138,18 @@ function switchReportTab(eventId) {
   if (!_allDecisions.has(eventId)) return;
   _currentEventId = eventId;
   const decision = _allDecisions.get(eventId);
+
+  // [2026-08-02] 告訴 chatbot 使用者換看哪一份報告了。
+  //
+  // 原本只有 `onDecisionCompleted()` 會設這個值，切分頁完全沒動——多事件時
+  // 你在看 B 的報告，chatbot 答的是 A。
+  //
+  // 現在後端不再把這個值當開關（沒帶到也會退回最新的一份，見
+  // `whatif_agent._current_incident_record()`），它只負責消歧：多起事件時
+  // 指出「使用者眼前是這一份」。
+  if (decision.trace_id && typeof ChatState !== "undefined") {
+    ChatState.currentTraceId = decision.trace_id;
+  }
   if (typeof updateTrafficChartForIncident === "function") {
     updateTrafficChartForIncident(decision);
   }
@@ -1259,7 +1284,7 @@ function appendActivityEntry(type, payload) {
   }
   
   const eventData = _activityByEvent.get(eventId);
-  const time = formatTime(new Date().toISOString());
+  const time = formatTime(nowSimAwareISO());
 
   let label, detail, color;
   if (type === "cycle_start") {
@@ -1574,6 +1599,16 @@ function updateStatusBanner(payload) {
 }
 
 // --- Header Clock ---
+/**
+ * [2026-08-02] **這裡刻意用真實時間，不要換成 `nowSimAware()`。**
+ *
+ * 全系統的時間都已經統一到模擬器時刻（見 `chat-utils.js::nowSimAware()` 與
+ * 後端 `src/clock.py`），只有這一盞例外：它跟旁邊的 `System Online` 是同一組
+ * 指示燈，講的是「這台機器現在活著、時鐘在走」。換成模擬器時間之後，模擬器
+ * 一暫停這裡就會定住，看起來就像系統當掉了——那正好是這盞燈要否定的事。
+ *
+ * 模擬器的時刻在畫面下方的 `#sim-current-time` 有自己的顯示位置。
+ */
 function initHeaderClock() {
   const el = document.getElementById("header-time");
   if (!el) return;
@@ -1828,7 +1863,7 @@ function onRoutesUpdated(payload) {
   
   // 保存這次變更記錄
   const changeRecord = {
-    time: payload.time || new Date().toISOString(),
+    time: payload.time || nowSimAwareISO(),
     reason: payload.affected_route === "primary" ? "主路線飽和" : 
             payload.affected_route === "secondary" ? "次路線飽和" : 
             payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和",
@@ -2408,6 +2443,134 @@ function renderReportsEventList() {
 }
 
 // 選擇事件並顯示報告詳情
+const _NOTIF_LANGS = [
+  ["zh", "中文", "ZH"],
+  ["en", "English", "EN"],
+  ["ja", "日本語", "JA"],
+  ["ko", "한국어", "KO"],
+];
+
+const _NOTIF_LABEL = Object.fromEntries(_NOTIF_LANGS.map(([k, label]) => [k, label]));
+
+/**
+ * 多語簡訊通報面板：內容 + 逐則複製 + 發送至 LINE。
+ *
+ * 發送功能尚未接通（沒有 LINE Messaging API 憑證，也還沒決定接收者從哪來），
+ * 但按鈕**現在就要在**——版面位置、動線、確認流程都先定下來，之後接 API
+ * 只需要把 `sendNotificationToLine()` 裡的 alert 換成一次 fetch。
+ *
+ * 按鈕刻意不做成 disabled：disabled 的按鈕沒有人知道它為什麼不能按。
+ * 可以按、按了明說「尚未接通」，比灰掉一顆按鈕誠實。
+ */
+/** 各事件目前選中的語言。切換後要記住，重新渲染才不會跳回中文。 */
+const _notifLangByEvent = new Map();
+
+function renderNotificationPanel(notifs, eventId) {
+  const available = _NOTIF_LANGS.filter(([k]) => notifs[k]);
+  if (available.length === 0) return "";
+
+  const eid = eventId || "";
+  const current = _notifLangByEvent.get(eid) || available[0][0];
+  const activeKey = notifs[current] ? current : available[0][0];
+
+  // [2026-08-02] 從「四語同時平鋪」改成「單欄 + 語言切換」。
+  //
+  // 平鋪的問題是：實際發送時只會送一種語言，四則並列反而讓人不確定
+  // 按下發送會送哪一則。單欄讓「你正在看的 = 你會送出的」，
+  // 選擇與後果之間沒有落差。
+  let html = `<div class="report-section">`;
+  html += `<div class="report-section-title notif-title-row">
+    <span>多語簡訊通報</span>
+    <select class="notif-lang-select" onchange="switchNotifLang('${escapeHtml(eid)}', this.value)">
+      ${available.map(([k, label, code]) =>
+        `<option value="${k}"${k === activeKey ? " selected" : ""}>${escapeHtml(label)} (${code})</option>`
+      ).join("")}
+    </select>
+  </div>`;
+
+  const text = notifs[activeKey];
+  html += `<div class="report-notifications">
+    <div class="report-notif-item">
+      <div class="report-notif-head">
+        <span class="report-notif-lang">${escapeHtml(_NOTIF_LABEL[activeKey] || activeKey)}</span>
+        <button class="notif-copy-btn" onclick="copyNotification(this)" data-text="${escapeHtml(text)}" title="複製這則通報">複製</button>
+      </div>
+      <div class="report-notif-text" id="notif-text-${escapeHtml(eid)}">${escapeHtml(text)}</div>
+    </div>
+  </div>`;
+
+  // 發送區。按鈕上標出當前語言，按下去送的就是畫面上這一則。
+  html += `<div class="notif-send-bar">
+    <div class="notif-send-target">
+      <span class="notif-send-label">發送對象</span>
+      <span class="notif-send-value">尚未設定接收者</span>
+    </div>
+    <button class="notif-send-btn" onclick="sendNotificationToLine('${escapeHtml(eid)}')">
+      📱 發送 ${escapeHtml(_NOTIF_LABEL[activeKey] || "")} 至 LINE
+    </button>
+  </div>`;
+
+  html += `</div>`;
+  return html;
+}
+
+/** 切換語言後重畫整份報告——發送按鈕上的語言標示也要跟著換。 */
+function switchNotifLang(eventId, lang) {
+  _notifLangByEvent.set(eventId || "", lang);
+  const decision = _allDecisions.get(eventId);
+  if (decision) renderReportDetail(decision);
+}
+
+/** 複製單則通報。剪貼簿 API 在非 HTTPS 下可能不可用，失敗要說出來。 */
+async function copyNotification(btn) {
+  const text = btn?.dataset?.text || "";
+  if (!text) return;
+  const original = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "已複製";
+  } catch (e) {
+    console.warn("[copyNotification] 複製失敗:", e);
+    btn.textContent = "複製失敗";
+  }
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
+/**
+ * 發送至 LINE。目前只有 UI，尚未接通。
+ *
+ * 之後要接的時候，這裡換成 `POST /api/notifications/{event_id}/send`，
+ * 後端再走 LINE Messaging API。接收者設定會放在上方的「發送對象」那一欄。
+ */
+function sendNotificationToLine(eventId) {
+  const lang = _notifLangByEvent.get(eventId || "") || "zh";
+  const label = _NOTIF_LABEL[lang] || lang;
+  const decision = _allDecisions.get(eventId);
+  const text = decision?.notifications?.[lang] || "";
+
+  alert(
+    `LINE 發送功能尚未接通。\n\n` +
+    `將送出的內容（${label}）：\n${text}\n\n` +
+    "目前缺兩件事：\n" +
+    "  1. LINE Messaging API 憑證\n" +
+    "  2. 接收者設定（要送給誰）\n\n" +
+    "待接通後，此按鈕會把上面這則訊息送到指定的 LINE 帳號。"
+  );
+}
+
+/**
+ * 從 Dashboard 的「查看完整建議書」跳到 Reports 頁並選中該事件。
+ *
+ * 兩件事一起做才有意義：只切頁面會落在「請從左側選擇事件」的空畫面，
+ * 使用者得再點一次才看得到他本來就在看的那份報告。
+ */
+function openReportInReportsPage(eventId) {
+  switchPage("reports");
+  if (eventId && _allDecisions.has(eventId)) {
+    selectReportEvent(eventId);
+  }
+}
+
 function selectReportEvent(eventId) {
   _selectedReportEventId = eventId;
   
@@ -2474,61 +2637,53 @@ function renderReportDetail(decision) {
   
   html += `</div>`; // end summary-grid
   
-  // === 路線規劃 ===
-  if (decision.routes && (decision.routes.primary || decision.routes.secondary)) {
-    html += `<div class="report-section">`;
-    html += `<div class="report-section-title">疏散路線規劃</div>`;
-    html += `<div class="report-routes">`;
-    
-    if (decision.routes.primary) {
-      const p = decision.routes.primary;
-      const changedNote = p._changedAt ? ' (已更新)' : '';
-      html += `
-        <div class="report-route-item">
-          <div class="report-route-dot primary"></div>
-          <div class="report-route-info">
-            <div class="report-route-name">主路線：${escapeHtml(p.name)}${changedNote}</div>
-            <div class="report-route-meta">飽和度 ${(p.saturation_score * 100).toFixed(0)}% · 容量 ${p.capacity_vph} vph</div>
-          </div>
-        </div>
-      `;
-    }
-    
-    if (decision.routes.secondary) {
-      const s = decision.routes.secondary;
-      const changedNote = s._changedAt ? ' (已更新)' : '';
-      html += `
-        <div class="report-route-item">
-          <div class="report-route-dot secondary"></div>
-          <div class="report-route-info">
-            <div class="report-route-name">次路線：${escapeHtml(s.name)}${changedNote}</div>
-            <div class="report-route-meta">飽和度 ${(s.saturation_score * 100).toFixed(0)}% · 容量 ${s.capacity_vph} vph</div>
-          </div>
-        </div>
-      `;
-    }
-    
-    html += `</div></div>`;
-    
-    // 排除路段
-    if (decision.routes.excluded && decision.routes.excluded.length > 0) {
-      html += `<div class="report-section">`;
-      html += `<div class="report-section-title">排除路段</div>`;
-      html += `<div style="display:flex;flex-direction:column;gap:6px;">`;
-      decision.routes.excluded.forEach(e => {
-        html += `<div style="font-size:0.8rem;color:var(--text-muted);padding:8px 12px;background:var(--bg-elevated);border-radius:var(--radius-sm);border:1px solid var(--border);">`;
-        html += `<span style="color:hsl(0,70%,60%);">✗</span> ${escapeHtml(e.name)} — <code style="font-size:0.7rem;background:var(--bg);padding:2px 6px;border-radius:3px;">${escapeHtml(e.reason_code)}</code>`;
-        html += `</div>`;
-      });
-      html += `</div></div>`;
+  // === 決策推理過程（step by step）===
+  //
+  // [2026-08-02] 取代原本分散的「路線規劃 / 排除路段 / 後續風險」三段。
+  // 那三段講的是**結果**，而長官看完結果一定會問「為什麼」——為什麼是這條、
+  // 為什麼別條不行、90 分鐘怎麼算出來的。答案本來散在 RoutePlan、excluded、
+  // ETE formula、projected_risks 四個地方，沒有一條線把它們串起來。
+  //
+  // 現在串成編號步驟鏈，每一步都帶「依據」（哪個模組、哪條 SOP）。
+  if (typeof renderDecisionReasoning === "function") {
+    const reasoning = renderDecisionReasoning(decision);
+    if (reasoning) {
+      html += `<div class="report-section">${reasoning}</div>`;
     }
   }
-  
+
+  // === 路線變更歷史 ===
+  if (decision._routeHistory && decision._routeHistory.length > 0) {
+    html += `<div class="report-section">`;
+    html += `<div class="report-section-title">路線變更歷史</div>`;
+    html += `<div style="display:flex;flex-direction:column;gap:8px;">`;
+    decision._routeHistory.forEach((change, idx) => {
+      const time = change.time
+        ? new Date(change.time).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
+        : "";
+      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
+      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
+      html += `<div style="font-size:0.8rem;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="color:var(--text-secondary);">第 ${idx + 1} 次重規劃</span>
+          <span style="color:var(--text-muted);font-size:0.72rem;">${escapeHtml(time)}</span>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">原因：${escapeHtml(change.reason || "")}</div>
+        <div><span style="color:var(--level-a);">✗ ${escapeHtml(oldName)}</span> → <span style="color:var(--route-primary);">✓ ${escapeHtml(newName)}</span></div>
+      </div>`;
+    });
+    html += `</div></div>`;
+  }
+
   // === 交控建議書全文 ===
+  // [2026-08-01] 原本用 `escapeHtml()` 輸出，於是 `##` 標題、`**粗體**`、表格
+  // 全部以原始字元顯示——LLM 產出的本來就是 Markdown。Dashboard 那邊一直是
+  // `renderMarkdown()`，這裡沒跟上。`renderMarkdown` 內部一樣會先逃逸再套語法，
+  // 安全性不變。
   if (decision.control_center_report) {
     html += `<div class="report-section">`;
     html += `<div class="report-section-title">交控建議書全文</div>`;
-    html += `<div class="report-full-content">${escapeHtml(decision.control_center_report)}</div>`;
+    html += `<div class="report-full-content md">${renderMarkdown(decision.control_center_report)}</div>`;
     html += `</div>`;
   }
   
@@ -2538,36 +2693,7 @@ function renderReportDetail(decision) {
     const hasNotifs = notifs.zh || notifs.en || notifs.ja || notifs.ko;
     
     if (hasNotifs) {
-      html += `<div class="report-section">`;
-      html += `<div class="report-section-title">多語簡訊通報</div>`;
-      html += `<div class="report-notifications">`;
-      
-      if (notifs.zh) {
-        html += `<div class="report-notif-item">
-          <div class="report-notif-lang">中文 (ZH)</div>
-          <div class="report-notif-text">${escapeHtml(notifs.zh)}</div>
-        </div>`;
-      }
-      if (notifs.en) {
-        html += `<div class="report-notif-item">
-          <div class="report-notif-lang">English (EN)</div>
-          <div class="report-notif-text">${escapeHtml(notifs.en)}</div>
-        </div>`;
-      }
-      if (notifs.ja) {
-        html += `<div class="report-notif-item">
-          <div class="report-notif-lang">日本語 (JA)</div>
-          <div class="report-notif-text">${escapeHtml(notifs.ja)}</div>
-        </div>`;
-      }
-      if (notifs.ko) {
-        html += `<div class="report-notif-item">
-          <div class="report-notif-lang">한국어 (KO)</div>
-          <div class="report-notif-text">${escapeHtml(notifs.ko)}</div>
-        </div>`;
-      }
-      
-      html += `</div></div>`;
+      html += renderNotificationPanel(notifs, decision.incident?.event_id || decision.trace_id);
     }
   }
   
@@ -2689,6 +2815,24 @@ function renderIncidentMonitor() {
   grid.innerHTML = html;
 }
 
+/** 路線顯示：路名優先，代號當註記。找不到就回「—」。 */
+function _routeLabel(route) {
+  if (!route) return "—";
+  if (route.name && route.segment_id) return `${route.name}（${route.segment_id}）`;
+  return route.name || route.segment_id || "—";
+}
+
+/** 事件時間顯示成 HH:MM。解析不了就原樣回傳，不要吞掉資訊。 */
+function _formatEventTime(value) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (!isNaN(d.getTime())) {
+    return d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  const m = String(value).match(/(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : String(value);
+}
+
 /**
  * 產生單張事件卡片 HTML（Task 2 會補齊欄位與樣式）
  */
@@ -2698,17 +2842,21 @@ function _renderIncidentCard(eventId, decision, isCleared) {
   const levelClass = level ? `level-${level.toLowerCase()}` : "";
   const clearedClass = isCleared ? "cleared" : "";
   const statusLabel = isCleared ? "已解除" : "進行中";
-  const toggleBtnText = isCleared ? "復原" : "解除事件";
+  const toggleBtnText = isCleared ? "已解除" : "解除事件";
 
   const description = incident.description || incident.type || eventId;
   const location = incident.location || "—";
   const eteMinutes = decision.ete?.minutes ?? "—";
   const recoveryAt = decision.ete?.recovery_at || "—";
-  const primaryRoute = decision.routes?.primary?.segment_id || "—";
-  const primaryName = decision.routes?.primary?.name || "";
-  const secondaryRoute = decision.routes?.secondary?.segment_id || "—";
-  const secondaryName = decision.routes?.secondary?.name || "";
-  const timestamp = incident.timestamp || "—";
+
+  // 路線顯示路名優先、代號放後面。指揮官不背 RD_TPE_004 這種編號，
+  // 原本寫成「RD_TPE_004 (市民大道四段)」，要讀的東西被擠到括號裡。
+  const primaryRoute = _routeLabel(decision.routes?.primary);
+  const secondaryRoute = _routeLabel(decision.routes?.secondary);
+
+  // 時間只顯示 HH:MM。原本直接印 incident.timestamp，
+  // 畫面上會出現「2026-05-20T22:10:00+08:00」這種給機器看的字串。
+  const timestamp = _formatEventTime(incident.timestamp);
 
   return `
     <div class="incident-card ${levelClass} ${clearedClass}" data-event-id="${escapeHtml(eventId)}">
@@ -2723,8 +2871,8 @@ function _renderIncidentCard(eventId, decision, isCleared) {
         <div class="incident-metric"><span class="metric-label">預估恢復</span><span class="metric-value">${escapeHtml(recoveryAt)}</span></div>
       </div>
       <div class="incident-card-routes">
-        <div class="route-item primary"><span class="route-label">主線</span><span class="route-value">${escapeHtml(primaryRoute)}${primaryName ? ` (${escapeHtml(primaryName)})` : ""}</span></div>
-        <div class="route-item secondary"><span class="route-label">次線</span><span class="route-value">${escapeHtml(secondaryRoute)}${secondaryName ? ` (${escapeHtml(secondaryName)})` : ""}</span></div>
+        <div class="route-item primary"><span class="route-label">主線</span><span class="route-value">${escapeHtml(primaryRoute)}</span></div>
+        <div class="route-item secondary"><span class="route-label">次線</span><span class="route-value">${escapeHtml(secondaryRoute)}</span></div>
       </div>
       <div class="incident-card-meta">
         <span class="meta-event-id">${escapeHtml(eventId)}</span>
@@ -2739,22 +2887,66 @@ function _renderIncidentCard(eventId, decision, isCleared) {
 }
 
 /**
- * 切換事件解除狀態
+ * 切換事件解除狀態。
+ *
+ * [2026-08-01 修正] 原本這個函式只動 `_clearedIncidents` 這個前端 Set，
+ * **完全沒有呼叫後端**。而 Advisory Report 上的「解除事件」走的是
+ * `resolveIncident()` → `POST /api/incidents/{id}/resolve`，會真的把事件
+ * 移出 `active_incidents` 並釋放封閉路段。
+ *
+ * 於是同一個「解除」在兩個畫面有兩種行為：Monitor 上按完顯示「已解除」，
+ * 後端卻仍認為那條路是封閉的，其他事件重新規劃路線時照樣把它排除。
+ * 前端說已解除、後端說還封著——這種狀態分裂查起來非常痛苦。
+ *
+ * 現在一律走後端；`_clearedIncidents` 退化成純粹的顯示快取，由後端結果決定。
  */
-function toggleClearIncident(eventId) {
-  if (_clearedIncidents.has(eventId)) {
-    _clearedIncidents.delete(eventId);
-  } else {
-    _clearedIncidents.add(eventId);
+async function toggleClearIncident(eventId) {
+  const isCleared = _clearedIncidents.has(eventId);
+
+  if (isCleared) {
+    // 復原目前沒有對應的後端端點（resolve 是單向的）。與其假裝可以復原、
+    // 讓前端再次跟後端脫節，不如明說。
+    alert("事件解除後無法復原。若需重新評估，請重新注入該事件。");
+    return;
   }
-  renderIncidentMonitor();
+
+  if (!confirm(`確定要解除事件 ${eventId}？\n\n這會釋放封閉的路段，讓其他事件可以重新評估替代路線。`)) return;
+
+  try {
+    const res = await fetch(`/api/incidents/${encodeURIComponent(eventId)}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json();
+
+    if (data.status !== "ok") {
+      alert("解除失敗：" + (data.message || data.errors?.[0]?.message || "未知錯誤"));
+      return;
+    }
+
+    _clearedIncidents.add(eventId);
+    const dec = _allDecisions.get(eventId);
+    if (dec) dec._resolved = true;
+
+    renderIncidentMonitor();
+    // 建議書上的解除狀態也要跟著變，否則兩個畫面又不一致
+    if (_currentEventId === eventId) _renderReportContent(_allDecisions.get(eventId));
+  } catch (e) {
+    console.error("[toggleClearIncident] 解除失敗:", e);
+    alert("解除失敗，請確認連線狀態");
+  }
 }
 
 /**
- * 刪除事件（從 _allDecisions 移除）
+ * 從畫面移除事件卡片。
+ *
+ * 刻意**只清前端**，而且措辭改成「移除卡片」不是「刪除事件」——後端沒有
+ * 刪除決策紀錄的端點，決策軌跡依 SPEC-00 也不該被使用者刪掉（那是稽核資料）。
+ * 原本的確認訊息寫「此操作無法復原」，會讓人以為後端資料也被清掉了。
  */
 function deleteIncident(eventId) {
-  if (!confirm(`確定要刪除事件「${eventId}」嗎？此操作無法復原。`)) return;
+  if (!confirm(`確定要從畫面移除「${eventId}」的卡片嗎？\n\n只影響顯示，後端的決策紀錄與軌跡不受影響。`)) return;
   _allDecisions.delete(eventId);
   _clearedIncidents.delete(eventId);
   renderIncidentMonitor();

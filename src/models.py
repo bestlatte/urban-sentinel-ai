@@ -15,6 +15,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from src import clock
+
 SCHEMA_VERSION = "1.0"
 """Envelope 的 schema_version 固定值，唯一來源 `contracts/module_exchange_contract.json` 第 3 行。"""
 
@@ -180,8 +182,19 @@ FindingCode = Literal[
     "PREDICTED_COLLAPSE",
     "CASCADE_RISK",
     "SCENARIO_COMPARED",
+    "INTERSECTION_FILTER_RELAXED",
 ]
-"""五值，唯一來源 SPEC-00 §3.4；本次核心範圍只會用到 SATURATED_BUT_RETAINED，其餘為 X1/X2 延伸功能保留值。"""
+"""SPEC-00 §3.4 原定五值；`INTERSECTION_FILTER_RELAXED` 為 [2026-08-01] 新增。
+
+[2026-08-02 修正] 上一次處理合併衝突時，`routing.plan_route()` 加了這個
+finding 卻沒有同步加進本 Literal，於是只要走到「放寬直接相鄰篩選」那條路徑
+就會拋 `ValidationError` **整個路線規劃崩掉**。
+
+觸發條件不罕見：15 條路段裡有 10 條的 alternatives 全部通不過相鄰篩選
+（延吉街 RD_TPE_008 就是其中之一），對這些路段做 What-if 假設封閉必炸。
+之所以沒有立刻被發現，是因為既有測試都用 ACC_001（RD_TPE_002），
+而它剛好是篩選能正常運作的那 5 條之一。
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +354,16 @@ class RouteRequest(BaseModel):
     incident: Incident
     bundle: NormalizedDataBundle
     as_of: datetime
+    extra_closed_segments: list[str] = Field(default_factory=list)
+    """除了 `incident` 本身以外，還有哪些路段不能走。
+
+    [2026-08-02 新增] 用於 What-if 的**疊加情境**：ACC_001（光復南路）進行中時
+    問「如果延吉街也封閉」，兩條路都要從候選中排除。原本 `plan_route()` 只認
+    `incident.affected_segment`，所以第二條封閉路段會被當成正常候選推薦出去——
+    系統會建議車流改道到一條剛剛才被假設封閉的路上。
+
+    也涵蓋多起同時進行的真實事件（各自封了不同路段）。
+    """
 
 
 class RouteCandidate(BaseModel):
@@ -351,6 +374,17 @@ class RouteCandidate(BaseModel):
     eligible: bool
     reason_code: ReasonCode | None = None
     """不合格時的排除理由；合格時為 None。"""
+    position: Literal["upstream", "downstream", "parallel"] | None = None
+    """相對事故點的位置。
+
+    [2026-08-02 新增] 這是「為什麼主線是它」的關鍵，而它以前只存在於
+    `plan_route()` 的區域變數裡，沒有離開過那個函式。
+
+    實測後果：ACC_001 的主線是市民大道四段（飽和度 0.78），次線是仁愛路四段
+    （0.65）。長官很自然會問「為什麼不走比較空的那條」——正確答案是
+    SOP-2 §2a(3) 的**上游優先**（市民大道在上游、仁愛路在下游），但這條資訊
+    沒有進事實區塊，模型只能猜或含糊帶過。
+    """
     saturation_score: float | None
     capacity_vph: int
     snapshot_at: datetime | None
@@ -368,6 +402,13 @@ class RouteFinding(BaseModel):
 class RoutePlan(BaseModel):
     """M2 routing.py 的輸出。"""
 
+    selection_rule: str | None = None
+    """主/次線是依什麼規則挑出來的（人話一句）。
+
+    [2026-08-02 新增] 沒有它，「為什麼是這條」這個最常見的追問答不出來。
+    排序規則寫死在 `plan_route()` 的 `sort_key` 裡：上游優先，同組內
+    飽和度低者優先、同飽和度取容量大者。這句話要跟著結果一起走。
+    """
     primary: RouteCandidate | None
     secondary: RouteCandidate | None
     excluded: list[RouteCandidate]
@@ -648,7 +689,7 @@ def build_envelope(
         message_type=message_type,
         source_module=source_module,
         target_module=target_module,
-        generated_at=datetime.now(tz=TZ_TAIPEI),
+        generated_at=clock.now(),
         status=status,
         provenance=provenance or [],
         warnings=warnings or [],

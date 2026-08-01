@@ -27,7 +27,7 @@
   margin: 1em 0 0.4em;
   font-weight: 650;
   line-height: 1.35;
-  color: var(--text, inherit);
+  color: var(--surface-text, inherit);
   letter-spacing: -0.01em;
 }
 
@@ -41,7 +41,7 @@
 
 .md h4.md-h {
   font-size: 0.94em;
-  color: var(--text-secondary, inherit);
+  color: var(--surface-text-dim, inherit);
 }
 
 .md .md-list {
@@ -56,7 +56,7 @@
 
 .md strong {
   font-weight: 650;
-  color: var(--text, inherit);
+  color: var(--surface-text, inherit);
 }
 
 .md .md-code {
@@ -78,7 +78,7 @@
   padding: 0.4em 0.75em;
   border-left: 3px solid rgba(127, 127, 127, 0.4);
   background: rgba(127, 127, 127, 0.07);
-  color: var(--text-secondary, inherit);
+  color: var(--surface-text-dim, inherit);
 }
 
 /* 表格：橫向可捲動。側邊面板很窄，寬表格若不能捲就會撐破版面

@@ -20,26 +20,26 @@
 
 .msg-user {
   align-self: flex-end;
-  background: hsl(0, 0%, 16%);
-  color: hsl(0, 0%, 95%);
+  background: var(--bg-elevated);
+  color: var(--text);
   border-bottom-right-radius: 3px;
 }
 
 .msg-ai {
   align-self: flex-start;
-  background: hsl(0, 0%, 8%);
-  color: hsl(0, 0%, 80%);
-  border: 1px solid hsl(0, 0%, 12%);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
   border-bottom-left-radius: 3px;
 }
 
 .msg-time {
   font-size: 0.6rem;
-  color: hsl(0, 0%, 40%);
+  color: var(--text-muted);
   margin-top: 3px;
 }
 
 .msg-user .msg-time {
   text-align: right;
-  color: hsl(0, 0%, 50%);
+  color: var(--text-muted);
 }

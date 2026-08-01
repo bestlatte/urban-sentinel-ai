@@ -90,11 +90,14 @@ class W1Response:
     必然一致——兩邊來自同一次推演。
     """
     trace_steps: list[dict] = field(default_factory=list)
-    """決策軌跡步驟（`decision_trace.get_trace_view()` 的 `steps`）。
+    """[2026-08-02 已停用，恆為空陣列]
 
-    [2026-08-01 新增] 決策軌跡原本只有 M4B 生成層讀得到，沒有任何路徑送到前端
-    ——所以 chatbot 回答「這個決策怎麼來的」時只有一段散文，看不到實際步驟
-    （誰做的、用什麼工具、依據哪條 SOP、排除了什麼、為什麼）。
+    這個欄位原本裝決策軌跡步驟（`decision_trace.get_trace_view()` 的 `steps`），
+    由 `orchestrator._attach_trace()` 填、前端畫成時間軸。對話框拿掉那個區塊後
+    （理由見 `frontend/js/chat-render.js::renderAIResponse()`），填寫端也一併停了。
+
+    欄位保留而不是刪除：`asdict(response)` 是 REST 與 WS 兩條路徑的 payload，
+    拔掉 key 會讓還沒更新的前端分頁在讀取時噴錯。空陣列對它們是安全的。
     """
 
 
@@ -270,6 +273,46 @@ def _extract_suggested_questions(text: str) -> list[str]:
     return list(DEFAULT_QUESTIONS)
 
 
+_DOMAIN_WORDS = (
+    "事件", "事故", "車禍", "封閉", "封路", "坍塌", "火災", "故障",
+    "路", "路段", "路線", "路網", "改道", "替代", "分流", "疏導", "管制",
+    "塞", "壅塞", "飽和", "車流", "車道", "人流", "捷運", "站", "公車",
+    "ETE", "ete", "恢復", "排除", "等級", "應變", "條款", "SOP", "sop",
+    "建議", "報告", "處理", "處置", "風險", "推演", "後續", "影響",
+    "警力", "號誌", "綠燈", "容量", "交通",
+)
+"""判斷「沒呼叫工具的回答」到底是追問還是閒聊的詞表。
+
+確定性關鍵字比對、零 LLM——跟 `orchestrator.handle_user_query()` 的路由、
+`whatif_agent.REPORT_INTENT_WORDS` 同一種做法，路由決策不交給模型。
+"""
+
+
+def classify_no_tool_intent(question: str | None) -> str:
+    """沒有呼叫任何工具時，這一輪到底是「追問建議書」還是「閒聊」。
+
+    [2026-08-02 新增，修一個由 prompt 改動引出的分類錯誤]
+    ----------------------------------------------------
+    原本的規則是 `if not tools_called: intent_type = "chitchat"`。那在工具是
+    唯一資訊來源的年代是對的——沒查 SOP、沒重算，那就沒什麼可談的。
+
+    但 `prompts/advisor.txt` 的 1-9 條現在**明文要求**：已經有建議書時不要呼叫
+    `simulate_scenario` 重算（重算只會產生一組跟螢幕上不一致的數字），直接引用
+    事實區塊。於是最正常的追問——「這起事件該怎麼處理？」——會走完整條路、
+    答得又準又完整，然後被標成 `chitchat`。
+
+    後果是前端把它當閒聊：不畫卡片、不畫後續風險推演。使用者問的是事件本身，
+    卻拿不到那張他最需要的圖。
+
+    `report_followup` 這個分類就是為了把這種回答跟真正的閒聊分開：兩者都沒有
+    工具結果可畫成卡片，但前者該附上該週期的風險推演，後者不該。
+    """
+    text = question or ""
+    if any(word in text for word in _DOMAIN_WORDS):
+        return "report_followup"
+    return "chitchat"
+
+
 def _merge_sop_sections(invocations: list[ToolInvocation]) -> list[dict]:
     """合併所有 `query_sop` 的命中條款，依 section_number 去重取最高分。
 
@@ -366,7 +409,9 @@ def format_response(raw_response, context, messages: list | None = None) -> W1Re
             tools_called.append(inv.name)
 
     if not tools_called:
-        intent_type = "chitchat"
+        # 見 `classify_no_tool_intent()`：沒呼叫工具不等於閒聊，有建議書時
+        # 「直接引用、不要重算」正是 prompt 明文要求的行為。
+        intent_type = classify_no_tool_intent(getattr(context, "new_message", None))
     elif "simulate_scenario" in tools_called:
         intent_type = "whatif_simulation"
     else:

@@ -140,8 +140,19 @@ def test_trace_endpoint_unknown_id_is_data_not_found_not_500():
     assert d["errors"][0]["code"] == "DATA_NOT_FOUND"
 
 
-def test_chat_reply_carries_trace_steps():
-    """帶 current_trace_id 的對話回覆必須含軌跡——這是使用者回報的缺口本身。"""
+def test_chat_reply_does_not_carry_trace_steps():
+    """[2026-08-02 期望反轉] 對話回覆**不得**再帶決策軌跡。
+
+    這個測試原本斷言相反的事（`assert payload["trace_steps"]`）。軌跡曾經是
+    使用者要求補上的缺口，補上之後實際用起來的結論是：在幾百像素寬的側邊
+    對話框裡，一份「誰在第幾步呼叫了什麼工具、耗時幾毫秒」的稽核紀錄會把
+    真正的答案往下擠掉一整屏。它現在只出現在 Report 頁的「決策推理過程」。
+
+    `trace_id` 仍然要帶——前端沒有用它畫東西，但它是「這個回答依據的是哪個
+    決策週期」的唯一憑據，出問題時要靠它對帳。
+
+    軌跡本身沒有消失，`/api/trace/{id}` 照樣查得到（上面的測試涵蓋）。
+    """
     trace_id = _seed_trace()
     with TestClient(app) as client:
         d = client.post("/api/what-if", json={
@@ -153,8 +164,7 @@ def test_chat_reply_carries_trace_steps():
 
     payload = d["payload"]
     assert payload["trace_id"] == trace_id
-    assert payload["trace_steps"], "對話回覆沒有帶決策軌跡"
-    assert any(s["agent"] == "R4" for s in payload["trace_steps"])
+    assert payload["trace_steps"] == [], "對話回覆不該再帶決策軌跡"
 
 
 def test_chat_reply_without_trace_id_has_empty_trace():

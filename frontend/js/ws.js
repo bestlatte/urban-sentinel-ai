@@ -105,6 +105,10 @@ function handleServerMessage(msg) {
       break;
 
     case "chat.loading_start.v1":
+      // [2026-08-02] 本地 `sendMessage()` 已經畫過一次思考中泡泡，這裡再畫就是
+      // 第二個（守衛是「correlation_id 不符才 return」，也就是**相符時才畫**，
+      // 而本地那次用的正是同一個 id）。`renderLoadingStart()` 現在是冪等的，
+      // 所以這一行退化成保險：只有在本地沒畫成功時才會真的生出泡泡。
       if (payload.correlation_id !== ChatState.currentCorrelationId) return;
       renderLoadingStart(payload.steps || []);
       break;

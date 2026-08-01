@@ -1,0 +1,146 @@
+/* 多語簡訊通報面板 + Dashboard 跳轉入口。
+ *
+ * [2026-08-01] 兩件事一起做：
+ *   1. Dashboard 的 Advisory Report 不再塞 500 字全文，改成一顆跳轉按鈕
+ *   2. Reports 頁的通報區加上逐則複製與「發送至 LINE」
+ *
+ * 一律使用 styles.css 的主題變數（--bg-card / --text / --border …），
+ * 不寫死顏色——本專案有過「另一套配色殘留在 JS 裡」的教訓，
+ * 選中的分頁會突然變成近白底配灰字。
+ */
+
+/* ---- Dashboard：查看完整建議書 ---- */
+
+.report-jump-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.report-jump-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.report-jump-hint {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* ---- 通報逐則 ---- */
+
+/* 語言切換：放在區塊標題那一列，跟「你正在看哪一則」綁在一起 */
+.notif-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.notif-lang-select {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.notif-lang-select:hover { border-color: var(--accent); }
+
+.report-notif-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.notif-copy-btn {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.notif-copy-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- 發送列 ---- */
+
+.notif-send-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.notif-send-target {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.notif-send-label {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* 「尚未設定接收者」——用一般文字色而不是警示色。
+ * 這是待辦事項，不是錯誤，紅字會讓人以為系統壞了。 */
+.notif-send-value {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* 按鈕刻意**不做成 disabled**：灰掉的按鈕沒有人知道它為什麼不能按。
+ * 可以按、按下去明說「尚未接通、還缺什麼」，比灰掉誠實。 */
+.notif-send-btn {
+  flex: none;
+  padding: 7px 16px;
+  border: 1px solid var(--route-primary);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--route-primary);
+  font-family: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.notif-send-btn:hover {
+  background: var(--route-primary);
+  color: var(--bg-card);
+}

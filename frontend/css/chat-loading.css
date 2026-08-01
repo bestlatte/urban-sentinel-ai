@@ -13,7 +13,7 @@
 .loading-dots span {
   width: 5px;
   height: 5px;
-  background: hsl(0, 0%, 50%);
+  background: var(--text-muted);
   border-radius: 50%;
   animation: dot-bounce 1.4s infinite ease-in-out both;
 }
@@ -34,7 +34,7 @@
 
 .loading-step {
   padding: 3px 0;
-  color: hsl(0, 0%, 40%);
+  color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -45,7 +45,7 @@
 }
 
 .loading-step.active {
-  color: hsl(0, 0%, 80%);
+  color: var(--text-secondary);
   font-weight: 500;
 }
 

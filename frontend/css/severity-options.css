@@ -7,9 +7,9 @@
 .sev-block {
   margin: 10px 0;
   padding: 10px 12px;
-  border: 1px solid var(--border, #1f1f23);
+  border: 1px solid var(--surface-border);
   border-radius: 8px;
-  background: var(--bg-card, #0c0c0f);
+  background: var(--surface);
 }
 
 .sev-head {
@@ -24,7 +24,7 @@
 .sev-title {
   font-size: 0.78rem;
   font-weight: 600;
-  color: var(--chat-primary, hsl(0, 0%, 95%));
+  color: var(--surface-text);
 }
 
 .sev-asof {
@@ -35,8 +35,21 @@
 
 .sev-note {
   font-size: 0.66rem;
-  color: var(--text-muted, #71717a);
+  color: var(--surface-text-faint);
   margin-bottom: 8px;
+}
+
+/* 疊加基準：所有數字都建立在這起還沒排除的真實事件之上，
+ * 不講出來使用者會以為系統把它忘了。 */
+.sev-base {
+  margin-bottom: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  border-left: 3px solid var(--level-b, hsl(25, 95%, 53%));
+  background: hsla(25, 95%, 53%, 0.1);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--surface-text-dim);
 }
 
 /* ---- 比較表 ---- */
@@ -58,14 +71,14 @@
   border-radius: 5px;
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
-  background: var(--bg-elevated, #131316);
+  background: var(--surface-raised);
   min-width: 24rem;
 }
 
 .sev-row-head {
   background: transparent;
   font-size: 0.6rem;
-  color: var(--text-muted, #71717a);
+  color: var(--surface-text-faint);
   padding-bottom: 2px;
 }
 
@@ -81,7 +94,7 @@
   height: 7px;
   border-radius: 50%;
   flex: none;
-  background: var(--text-muted, #71717a);
+  background: var(--surface-text-faint);
 }
 
 .sev-row-head .sev-dot { display: none; }
@@ -99,7 +112,7 @@
 
 .sev-c-route,
 .sev-c-risk {
-  color: var(--text-secondary, #a1a1aa);
+  color: var(--surface-text-dim);
   font-size: 0.66rem;
 }
 
@@ -110,15 +123,15 @@
   border-radius: 3px;
   font-size: 0.58rem;
   background: hsla(0, 84%, 60%, 0.16);
-  color: hsl(0, 84%, 72%);
+  color: var(--surface-danger-text);
 }
 
 /* 講明下面的推演是用哪一種算的——不講的話使用者會誤以為那是唯一答案 */
 .sev-active {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px dashed var(--border, #1f1f23);
+  border-top: 1px dashed var(--surface-border);
   font-size: 0.63rem;
   line-height: 1.6;
-  color: var(--text-muted, #71717a);
+  color: var(--surface-text-faint);
 }

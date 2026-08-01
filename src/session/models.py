@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from src import clock
+
 
 @dataclass
 class Turn:
@@ -31,7 +33,7 @@ class Session:
     history: list[Turn] = field(default_factory=list)
     assumptions: dict[str, float | int | str] = field(default_factory=dict)
     """key 格式 "{entity}.{field}"，同一 key 被重新假設時覆蓋舊值。"""
-    created_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=clock.now)
 
 
 @dataclass

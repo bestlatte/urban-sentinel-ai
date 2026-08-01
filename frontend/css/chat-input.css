@@ -2,7 +2,7 @@
 
 .chat-input-area {
   padding: 12px 16px;
-  border-top: 1px solid hsl(0, 0%, 12%);
+  border-top: 1px solid var(--border);
   display: flex;
   gap: 8px;
   align-items: center;
@@ -11,29 +11,29 @@
 .chat-input-area input {
   flex: 1;
   padding: 9px 12px;
-  border: 1px solid hsl(0, 0%, 16%);
+  border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 0.825rem;
   outline: none;
-  background: hsl(0, 0%, 6%);
-  color: hsl(0, 0%, 90%);
+  background: var(--bg);
+  color: var(--text);
   transition: border-color 0.15s;
 }
 
 .chat-input-area input:focus {
-  border-color: hsl(0, 0%, 30%);
+  border-color: var(--border-hover);
 }
 
 .chat-input-area input:disabled {
-  background: hsl(0, 0%, 8%);
-  color: hsl(0, 0%, 40%);
+  background: var(--bg-card);
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
 .chat-input-area button {
   padding: 9px 14px;
-  background: hsl(0, 0%, 95%);
-  color: hsl(0, 0%, 5%);
+  background: var(--text);
+  color: var(--bg-card);
   border: none;
   border-radius: 6px;
   cursor: pointer;
@@ -44,12 +44,12 @@
 }
 
 .chat-input-area button:hover {
-  background: hsl(0, 0%, 85%);
+  background: var(--text);
 }
 
 .chat-input-area button:disabled {
-  background: hsl(0, 0%, 20%);
-  color: hsl(0, 0%, 40%);
+  background: var(--border);
+  color: var(--text-muted);
   cursor: not-allowed;
 }
 
@@ -62,16 +62,16 @@
 
 .quick-q {
   padding: 5px 10px;
-  background: hsl(0, 0%, 10%);
-  border: 1px solid hsl(0, 0%, 15%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 14px;
   font-size: 0.7rem;
-  color: hsl(0, 0%, 55%);
+  color: var(--text-muted);
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
 }
 
 .quick-q:hover {
-  color: hsl(0, 0%, 90%);
-  border-color: hsl(0, 0%, 25%);
+  color: var(--text);
+  border-color: var(--border-hover);
 }

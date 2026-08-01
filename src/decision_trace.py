@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Literal, get_args
 
+from src import clock
+
 logger = logging.getLogger(__name__)
 
 _TZ_TAIPEI = timezone(timedelta(hours=8))
@@ -84,7 +86,7 @@ class TraceStep:
     findings: list[Finding] = field(default_factory=list)
     subject_segment_ids: list[str] = field(default_factory=list)
     duration_ms: int | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(tz=_TZ_TAIPEI))
+    timestamp: datetime = field(default_factory=lambda: clock.now())
 
 
 _TRACES: dict[str, TraceMeta] = {}
@@ -113,7 +115,7 @@ def open_trace(trace_id: str, triggered_by: list[str]) -> None:
     _TRACES[trace_id] = TraceMeta(
         trace_id=trace_id,
         triggered_by=triggered_by,
-        opened_at=datetime.now(tz=_TZ_TAIPEI),
+        opened_at=clock.now(),
     )
     _STEPS[trace_id] = []
 

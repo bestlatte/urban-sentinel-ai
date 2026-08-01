@@ -69,8 +69,8 @@ async function sendMessage(text) {
   ChatState.isLocked = true;
   ChatState.currentCorrelationId = generateId();
 
-  // 顯示 loading
-  renderLoadingStart(["解析問題意圖", "檢索 SOP 條款", "呼叫決策模組", "計算 ETE", "組合回覆"]);
+  // 顯示 loading（步驟文字由 chat-render.js 的 LOADING_STEPS 統一提供）
+  renderLoadingStart(LOADING_STEPS);
 
   try {
     // 走 REST，不走 WS

@@ -1,0 +1,204 @@
+/* 決策推理過程 — 設計說明見 frontend/js/decision-reasoning.js
+ *
+ * 版面是縱向的編號步驟鏈，左側一條連續縱線把各步串起來。
+ * 用步驟而不是卡片並列：推理是有順序的，②要有①才成立，
+ * 並列會讓人以為它們是彼此獨立的資訊。
+ */
+
+.decision-reasoning {
+  margin-top: 4px;
+}
+
+.dr-head {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.dr-intro {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+
+/* ---- 步驟 ---- */
+
+.dr-step {
+  display: flex;
+  gap: 12px;
+  position: relative;
+  padding-bottom: 16px;
+}
+
+/* 連續縱線；最後一步不畫，鏈條才有結尾 */
+.dr-step:not(:last-child) .dr-step-marker::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 26px;
+  bottom: -16px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--border);
+}
+
+.dr-step-marker {
+  position: relative;
+  flex: none;
+  width: 26px;
+  display: flex;
+  justify-content: center;
+}
+
+.dr-step-no {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--bg-card);
+  background: var(--accent);
+  z-index: 1;
+}
+
+.dr-step-content { flex: 1; min-width: 0; }
+
+.dr-step-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 26px;
+}
+
+.dr-step-body {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+/* 依據：每一步都要能追到來源，這是「可 trace」的落點 */
+.dr-step-basis {
+  margin-top: 6px;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+
+/* ---- 內容元件 ---- */
+
+.dr-kv {
+  display: flex;
+  gap: 8px;
+  font-size: 0.76rem;
+  padding: 1px 0;
+}
+
+.dr-kv > span {
+  flex: none;
+  min-width: 6.5rem;
+  color: var(--text-muted);
+}
+
+.dr-clauses { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+
+.dr-clause {
+  padding: 2px 9px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.dr-level-A { color: var(--level-a); }
+.dr-level-B { color: var(--level-b); }
+
+/* ---- 路線篩選 ---- */
+
+.dr-routes { display: flex; flex-direction: column; gap: 5px; }
+
+.dr-route {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: var(--bg-elevated);
+  border-left: 3px solid var(--border);
+}
+
+.dr-route-primary { border-left-color: var(--route-primary); }
+.dr-route-secondary { border-left-color: var(--route-secondary); }
+/* 被排除的做淡一點——它們是「為什麼不是它」的答案，不是待辦事項 */
+.dr-route-excluded { border-left-color: var(--level-a); opacity: 0.72; }
+
+.dr-route-label {
+  flex: none;
+  width: 2.4rem;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.dr-route-name { font-weight: 600; font-size: 0.78rem; }
+
+.dr-route-meta {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 選擇規則：長官最常問的「為什麼是這條」，答案在這裡，做得顯眼一點 */
+.dr-rule {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: hsla(186, 78%, 42%, 0.1);
+  border-left: 3px solid var(--level-normal);
+  font-size: 0.74rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+.dr-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: hsla(0, 84%, 60%, 0.1);
+  border-left: 3px solid var(--level-a);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--level-a);
+}
+
+/* ---- ETE ---- */
+
+.dr-ete {
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dr-ete > span {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.dr-formula {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin: 2px 0 4px;
+}

@@ -93,24 +93,65 @@ WHATIF_AGENT = None
 # ---------------------------------------------------------------------------
 
 
-def _current_incident_record():
-    """取得使用者目前正在查看的決策週期紀錄（沒有則 None）。
+def records_with_report() -> list:
+    """所有**已經產出建議書**的進行中決策週期，最新的排在最前面。
 
-    走 `orchestrator._current_trace_ctx`（`handle_user_query()` 在轉發給 W1
-    之前設定的 ContextVar），跟 `agent/tools.py::_get_current_context()` 同一條路。
+    [2026-08-02] 這是「加問模式 vs 預測模式」的判斷依據。
+
+    使用者的定案：不必確認他正在看哪一份 report——只要 Reports 區裡有 report，
+    就該走加問那條路；沒有才走預測。前端 `_allDecisions`（Reports 分頁的資料源）
+    是由 `decision.completed.v1` 填的，跟後端 `active_incidents` 中
+    `decision_result` 有值的那些一一對應，所以這裡掃後端就等於掃畫面。
+
+    這麼改之後，前端有沒有正確傳 `current_trace_id` 不再是開關——傳錯最壞只是
+    多事件時選錯一份當主要參照，不會像原本那樣整個掉回「沒有任何事實」。
+
+    排序用 `trace_id`：格式是 `TR-YYYYmmdd-HHMM-NNNN`（見 `orchestrator`），
+    字串排序即時間排序，末四碼流水號讓同分鐘內的週期也分得出先後。
     """
     try:
         from src import orchestrator
 
+        records = [
+            r
+            for r in orchestrator.get_global_state().active_incidents.values()
+            if r.decision_result is not None and r.bundle_snapshot is not None
+        ]
+        return sorted(records, key=lambda r: r.trace_id or "", reverse=True)
+    except Exception:  # noqa: BLE001 - 取不到只影響回答豐富度，不能中斷對話
+        logger.debug("列舉決策週期失敗", exc_info=True)
+        return []
+
+
+def _current_incident_record():
+    """挑一份決策週期紀錄當作「主要參照」（沒有任何一份時回 None）。
+
+    [2026-08-02 不再硬綁 `current_trace_id`]
+    ----------------------------------------
+    原本這裡是「ContextVar 取不到 trace_id 就回 None」。那讓前端變成一個開關：
+    `switchReportTab()` 沒有同步 `ChatState.currentTraceId`（實際上就是沒有），
+    使用者切到第二份報告再發問，後端拿到的還是第一份的 id；更糟的是任何一次
+    沒帶到 id，chatbot 就退回「手上什麼事實都沒有」的狀態，開始憑空講話。
+
+    現在 trace_id 降級成**消歧提示**：對得上就用它（多事件時幫忙選對那份），
+    對不上或根本沒傳，就用最新的那一份。
+    """
+    records = records_with_report()
+    if not records:
+        return None
+
+    try:
+        from src import orchestrator
+
         trace_id = orchestrator._current_trace_ctx.get()
-        if trace_id is None:
-            return None
-        for record in orchestrator.get_global_state().active_incidents.values():
-            if record.trace_id == trace_id:
-                return record
-    except Exception:  # noqa: BLE001 - 取不到上下文只影響回答豐富度，不能中斷對話
-        logger.debug("取得當前決策週期失敗", exc_info=True)
-    return None
+        if trace_id is not None:
+            for record in records:
+                if record.trace_id == trace_id:
+                    return record
+    except Exception:  # noqa: BLE001
+        logger.debug("讀取 current_trace_id 失敗，改用最新的決策週期", exc_info=True)
+
+    return records[0]
 
 
 def build_cycle_facts_block(record) -> str | None:
@@ -182,12 +223,146 @@ def build_cycle_facts_block(record) -> str | None:
         return None
 
 
+_AMBIENT_TOP_N = 5
+"""態勢區塊列出前幾條最壅塞的路段。5 條足以看出「哪裡在燒」，再多就變成
+把整份資料倒進 prompt——那正是我們在 `reasoning-chain.js` 拿掉「命中 N 條」
+時判定為無用的東西。"""
+
+_MAX_EXTRA_REPORTS = 2
+"""除了主要參照那份以外，最多再附幾份建議書。
+
+每份 500~600 字，兩三份對 context 不構成壓力；再多就開始稀釋真正被問到的那份。
+"""
+
+
+def build_ambient_facts_block() -> str | None:
+    """沒有任何進行中事件時的態勢事實區塊（**預測模式**的依據）。
+
+    [2026-08-02 新增] 使用者的要求是：「若沒有 report，我們的 chatbot 也要給出
+    預測，但要合乎我們的邏輯」。
+
+    原本沒有事件時 `build_cycle_facts_block()` 直接回 `None`，prompt 裡一個數字
+    都沒有。模型手上沒有事實卻仍被要求回答路況問題，結果就是編——而編出來的
+    數字跟 Dashboard 上的圖表對不起來。
+
+    這個區塊給的是**此刻的全市態勢**：評估時刻、應變等級、最壅塞的幾條路段、
+    人流吃緊的站點。全部走跟決策週期同一支 `evaluate_rules()`，所以它講的數字
+    跟 Dashboard 的 KPI 必然同源。預測本身仍然只能由 `simulate_scenario` 算
+    （嚴格規則第 2 條沒有放寬），這裡只是讓它有個立足點。
+
+    評估時刻沿用 `whatif_engine.resolve_scenario_as_of()`（傳 `incident=None`）
+    ——模擬器在跑就用模擬器時刻，沒在跑就用資料集最新時刻。刻意**不**直接用
+    `clock.now()`：模擬器關掉時 `clock.now()` 回的是真實時間（例如 2026-08-02
+    凌晨兩點），而資料集是 2026-05-20 傍晚到深夜的，區塊會寫著「評估時刻
+    02:12」卻列出 23:30 的路況。這裡跟 What-if 重算走同一支解析，兩邊講的
+    時刻必然一致。
+    """
+    try:
+        from src import orchestrator
+        from src.whatif_engine import resolve_scenario_as_of
+
+        bundle = orchestrator.GATEWAY.load_data()
+        as_of, as_of_reason = resolve_scenario_as_of(bundle, None)
+        sensing = orchestrator.GATEWAY.evaluate_rules(bundle, None, as_of)
+
+        lines = [
+            "=== 目前全市態勢（無進行中事件，由系統計算，不得改寫）===",
+            f"評估時刻：{as_of:%Y-%m-%d %H:%M}（{as_of_reason}）",
+            f"應變等級：{getattr(sensing, 'traffic_level', None) or '正常'}",
+        ]
+
+        # 最壅塞的幾條路段。刻意不用 `sensing.rule_hits`——那裡只有**跨過門檻**
+        # 的，都沒超標時整個區塊會空掉，但「現在最塞的是哪幾條」即使全部低於
+        # 門檻也還是有意義的答案。
+        #
+        # 每條路段取 `as_of` 當下（含）之前最新的那筆，等同 as-of 查詢的語意。
+        latest_by_segment = {}
+        for record in bundle.traffic:
+            if record.saturation_score is None or record.timestamp > as_of:
+                continue
+            prev = latest_by_segment.get(record.segment_id)
+            if prev is None or record.timestamp > prev.timestamp:
+                latest_by_segment[record.segment_id] = record
+
+        top = sorted(
+            latest_by_segment.values(),
+            key=lambda r: -r.saturation_score,
+        )[:_AMBIENT_TOP_N]
+        if top:
+            names = {r.segment_id: r.name for r in bundle.road_network}
+            lines.append("目前飽和度最高的路段：")
+            for record in top:
+                seg = record.segment_id
+                lines.append(
+                    f"- {names.get(seg, seg)}（{seg}）飽和度 {record.saturation_score:.2f}"
+                    f"　車道 {getattr(record, 'lane_status', '—')}"
+                )
+
+        hits = getattr(sensing, "rule_hits", None) or []
+        if hits:
+            lines.append(f"此刻跨過門檻的條款共 {len(hits)} 條（屬全市背景，非單一事件所致）。")
+
+        lines.append(
+            "目前沒有任何進行中的事件，也沒有已產出的交控建議書。"
+            "使用者若問「會不會塞」「等一下怎樣」這類前瞻問題，"
+            "必須呼叫 simulate_scenario 重算，不可自行從上面的數字外推。"
+        )
+        return "\n".join(lines)
+    except Exception:  # noqa: BLE001 - 同上，降級成「沒有事實區塊」而不是中斷
+        logger.warning("組裝全市態勢區塊失敗，本次回答不帶事實上下文", exc_info=True)
+        return None
+
+
+def build_facts_context(record) -> str | None:
+    """依「Reports 裡有沒有 report」選事實區塊。
+
+    有 report → 加問模式：建議書全文 + 該週期的確定性事實 + 風險推演
+    沒 report → 預測模式：此刻的全市態勢
+
+    多起事件時把其餘幾份建議書也附上（`_MAX_EXTRA_REPORTS` 份為限）。使用者
+    問「這起事件怎麼辦」時我們並不知道他指的是哪一起，手上有全部才答得準；
+    每份 500~600 字，兩三份對 context 不構成壓力。
+    """
+    if record is None:
+        return build_ambient_facts_block()
+
+    primary = build_cycle_facts_block(record)
+    if primary is None:
+        # 週期還在跑、還沒到 PUSH 階段（`build_cycle_facts_block` 會回 None）。
+        # 此時給態勢比給半套事實好——半套事實模型會拿來當完整的講。
+        return build_ambient_facts_block()
+
+    parts = [primary]
+
+    others = [r for r in records_with_report() if r.trace_id != record.trace_id]
+    for other in others[:_MAX_EXTRA_REPORTS]:
+        decision = other.decision_result
+        if decision is None or not decision.control_center_report:
+            continue
+        location = getattr(other.incident, "location", None) or other.trace_id
+        parts.append(
+            f"另一起進行中事件（{location}）已產出的交控建議書：\n"
+            f"{decision.control_center_report}"
+        )
+    if others:
+        parts.append(
+            f"現場共有 {len(others) + 1} 起進行中事件。使用者的問題若沒有指明是哪一起，"
+            "先確認再回答，不要把不同事件的數字混在一起講。"
+        )
+
+    return "\n\n".join(parts)
+
+
+
 def _build_prompt(context, facts_block: str | None = None) -> str:
     """把 W1Context（history + assumptions + new_message）與當前週期事實組成 prompt。"""
     parts = []
 
     if facts_block:
-        parts.append("=== 當前決策週期的確定性事實（由系統計算，不得改寫）===")
+        # 態勢區塊自己帶標題（它講的不是「當前決策週期」而是「全市現況」），
+        # 只有週期事實需要在這裡補一行標題。
+        if not facts_block.lstrip().startswith("==="):
+            parts.append("=== 當前決策週期的確定性事實（由系統計算，不得改寫）===")
         parts.append(facts_block)
         parts.append(
             "以上數值由系統決定性模組算出，你只能引用不能修改。"
@@ -339,8 +514,12 @@ def process_whatif(context, timeout_s: float | None = None) -> W1Response:
     if not bedrock_enabled():
         return _degraded_response(context, reason="USE_BEDROCK=false（保底模式）")
 
+    # [2026-08-02] 事實區塊改由 `build_facts_context()` 決定走哪一條：
+    # Reports 裡有 report → 加問模式（建議書 + 週期事實），沒有 → 預測模式
+    # （全市態勢）。原本是直接呼叫 `build_cycle_facts_block()`，沒有事件時
+    # 回 None，模型手上一個數字都沒有還被要求回答路況問題。
     record = _current_incident_record()
-    facts_block = build_cycle_facts_block(record)
+    facts_block = build_facts_context(record)
     prompt = _build_prompt(context, facts_block)
 
     try:

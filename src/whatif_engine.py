@@ -278,15 +278,36 @@ def run_scenario(
     # [2026-08-01] 封閉假設 → 合成假想事故，讓整條「推演 → 解方」鏈跑起來。
     # 理由見 `synthesize_incident()`：不補這一步，使用者的封閉假設對規則引擎
     # 完全空轉，畫面上只會出現一堆與問題無關的背景命中。
-    if incident is None:
-        targets = closure_targets(overrides)
-        if targets:
-            return _closure_scenarios(bundle, targets[0], overrides, gateway, question)
+    #
+    # [2026-08-02 修正閘門] 原本寫 `if incident is None`，只在「沒有進行中事件」
+    # 時才合成。實測後果：ACC_001（光復南路）進行中時問「如果延吉街封閉會怎樣」，
+    # 合成被跳過 → 假設對規則引擎空轉 → 適用條款、路線、ETE **全部是光復南路的**。
+    #
+    #     使用者問延吉街，系統從頭到尾回答光復南路，而且語氣完全肯定。
+    #
+    # 正確的閘門不是「有沒有事件」，而是「**使用者假設的對象是不是現有事件本身**」：
+    #   假設對象 == 現有事件路段  → 他在調整這起事件的條件，照原路徑重算
+    #   假設對象 != 現有事件路段  → 這是一條**新的**封閉，要合成
+    #
+    # 後者在有事件時是**疊加**（光復南路已封 + 延吉街也封），不是取代——
+    # 指揮官問這句話時關心的是「又出一件，還撐不撐得住」，不是「重來一次」。
+    new_closures = [t for t in closure_targets(overrides) if not _is_current_incident_segment(t, incident)]
+    if new_closures:
+        return _closure_scenarios(
+            bundle, new_closures[0], overrides, gateway, question, base_incident=incident
+        )
 
     outcome = compute_scenario(bundle, incident, overrides, gateway)
     result = scenario_to_dict(outcome, overrides, incident)
     result["risk_projection"] = _project_for(outcome, incident)
     return result
+
+
+def _is_current_incident_segment(segment_id: str, incident: Incident | None) -> bool:
+    """這個路段是不是「現有事件本身」的路段。"""
+    if incident is None:
+        return False
+    return segment_id in {incident.affected_segment, incident.affected_road}
 
 
 def _project_for(outcome: ScenarioOutcome, incident: Incident | None) -> dict | None:
@@ -312,6 +333,7 @@ def _closure_scenarios(
     overrides: dict[str, float | int | str],
     gateway,
     question: str,
+    base_incident: Incident | None = None,
 ) -> dict:
     """「如果某條路封閉」的完整回答。
 
@@ -323,15 +345,34 @@ def _closure_scenarios(
     （SOP-7 base_clearance 60/40/20），那個差距會直接改變調度決策。與其猜一個
     使用者沒同意過的值、或是丟一個問題回去讓他再等一輪，不如把三種後果攤開，
     他掃一眼就知道自己面對的是哪一種。
+
+    `base_incident`（[2026-08-02 新增）：已經在進行中的真實事件。有值時這是
+    **疊加**情境——「光復南路已經封了，如果延吉街也封呢」。兩條路都會從候選中
+    排除，指揮官看到的才是「又出一件之後還剩什麼」，而不是把假設當成唯一的事件。
     """
-    as_of, as_of_reason = resolve_scenario_as_of(bundle, None)
+    # 有基準事件時用它的時刻，兩個情境才在同一個時間座標上比較
+    as_of, as_of_reason = (
+        (base_incident.timestamp, "進行中事件的發生時刻")
+        if base_incident is not None
+        else resolve_scenario_as_of(bundle, None)
+    )
     stated = detect_severity(question)
     severities = [stated] if stated else list(SEVERITY_LADDER)
+
+    # 疊加時，基準事件的封閉路段也不能走
+    extra_closed: list[str] = []
+    if base_incident is not None:
+        extra_closed = [
+            s for s in (base_incident.affected_segment, base_incident.affected_road)
+            if s and s.startswith("RD_")
+        ]
 
     scenarios = []
     for severity in severities:
         hypothetical = synthesize_incident(bundle, segment_id, severity, as_of)
-        outcome = compute_scenario(bundle, hypothetical, overrides, gateway)
+        outcome = compute_scenario(
+            bundle, hypothetical, overrides, gateway, extra_closed=extra_closed
+        )
         detail = scenario_to_dict(outcome, overrides, hypothetical)
         detail["severity"] = severity
         detail["severity_label"] = _SEVERITY_LABELS[severity]
@@ -350,6 +391,21 @@ def _closure_scenarios(
         "as_of": as_of.strftime("%H:%M"),
         "as_of_reason": as_of_reason,
         "severity_stated": stated is not None,
+        # 疊加資訊。前端要明說「這是在進行中事件之上再加你的假設」，
+        # 否則使用者會以為系統忘了那起真實事件。
+        "base_incident": (
+            {
+                "event_id": base_incident.event_id,
+                "location": base_incident.location,
+                "segment_id": base_incident.affected_segment,
+                "segment_name": next(
+                    (s.name for s in bundle.road_network
+                     if s.segment_id == base_incident.affected_segment),
+                    base_incident.affected_segment,
+                ),
+            }
+            if base_incident is not None else None
+        ),
     }
     # 只有在使用者沒指定嚴重度時才給比較表——指定了就沒有選項要挑。
     if stated is None:
@@ -523,32 +579,40 @@ def resolve_scenario_as_of(
     """決定 What-if 要用哪個時刻評估，並回傳選擇理由。
 
     優先序（由具體到泛用）：
-      1. 使用者正在查看的事故時間 —— 他問的就是這起事故的假設情境
-      2. 模擬器當前時間 —— 沒有事故但正在跑時間軸，畫面上顯示的就是這個時刻
+      1. 模擬器當前時間 —— 使用者畫面上的時刻，也是所有資料被評估的時刻
+      2. 事故發生時間 —— 沒有模擬器時，事故本身就是最具體的時間錨點
       3. 資料集最新時間 —— 前兩者都沒有時的保底
 
-    [2026-08-01] 第 2 條是新加的，也是本次修正的重點。原本沒有事故就直接掉到
-    第 3 條，於是使用者在模擬器上看著 22:10、開對話框問假設，系統卻拿 23:30
-    的資料回答他——那個時刻全市 15 條路段有 10 條飽和，畫面顯示「命中 15 條」
-    而使用者完全無法理解那些命中從哪來（因為跟他的假設無關，也跟他看的時間無關）。
+    [2026-08-02 第 1 與第 2 條對調]
+    ------------------------------
+    原本有事故時**固定回 `incident.timestamp`**，模擬器時間只在沒有事故時才輪
+    得到。那條規則會讓事故一發生，chatbot 的世界就凍結在那一刻：
+
+        22:10 注入事故 → 模擬器繼續跑到 23:10
+        → Dashboard 顯示 23:10 的路況（市民大道四段 0.98）
+        → chatbot 仍拿 22:10 回答（0.78）
+
+    使用者的原話是「chatbot 沒有做到我的要求，可能跟時間有關」。兩邊算的確實
+    是不同時刻的世界，而畫面上沒有任何地方講得出這件事。
+
+    只往前不往後（`max`）：模擬器可以被拉回事故之前的時間，但「事故發生前的
+    事故現場」不是一個有意義的評估對象，那會讓規則引擎在事故還不存在的路況上
+    套用事故條款。
 
     回傳理由字串是刻意的：這個選擇一定要能被使用者看見。任何「系統幫你挑了一個
-    你不知道的預設值」都會製造這種無法解釋的畫面。
+    你不知道的預設值」都會製造無法解釋的畫面。
     """
+    from src import clock
+
+    sim_time = clock.simulation_time()
+
     if incident is not None:
+        if sim_time is not None and sim_time > incident.timestamp:
+            return sim_time, f"模擬器當前時刻（事故發生於 {incident.timestamp:%H:%M}）"
         return incident.timestamp, "事故發生時刻"
 
-    # 模擬器時間。放在函式內 import：main 是應用層，被 src 反向依賴不理想，
-    # 但這裡要的是「使用者畫面上的時間」，那份狀態的唯一來源就是 main。
-    # 取不到就往下走，不讓它變成硬相依。
-    try:
-        from main import get_simulation_time
-
-        sim_time = get_simulation_time()
-        if sim_time is not None:
-            return sim_time, "模擬器當前時刻"
-    except Exception:  # noqa: BLE001
-        logger.debug("取不到模擬器時間，改用資料集最新時刻", exc_info=True)
+    if sim_time is not None:
+        return sim_time, "模擬器當前時刻"
 
     timestamps = [t.timestamp for t in bundle.traffic] + [c.timestamp for c in bundle.crowd]
     latest = max(timestamps) if timestamps else bundle.loaded_at
@@ -560,8 +624,13 @@ def compute_scenario(
     incident: Incident | None,
     overrides: dict[str, float | int | str],
     gateway,
+    extra_closed: list[str] | None = None,
 ) -> ScenarioOutcome:
-    """套用覆寫並重算，回傳物件版結果。`run_scenario()` 與情境建議書共用這一份。"""
+    """套用覆寫並重算，回傳物件版結果。`run_scenario()` 與情境建議書共用這一份。
+
+    `extra_closed`：除了 `incident` 本身以外還不能走的路段（疊加情境）。
+    見 `RouteRequest.extra_closed_segments`。
+    """
     overridden = apply_scenario_overrides(bundle, overrides)
     as_of, as_of_reason = resolve_scenario_as_of(bundle, incident)
     sensing = gateway.evaluate_rules(overridden, incident, as_of)
@@ -570,7 +639,12 @@ def compute_scenario(
     ete = None
     if incident is not None:
         route_plan = gateway.plan_routes(
-            RouteRequest(incident=incident, bundle=overridden, as_of=incident.timestamp)
+            RouteRequest(
+                incident=incident,
+                bundle=overridden,
+                as_of=incident.timestamp,
+                extra_closed_segments=list(extra_closed or []),
+            )
         )
         ete = gateway.calculate_ete(incident, overridden)
 

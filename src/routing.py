@@ -119,6 +119,50 @@ def _determine_position(
             return "downstream"
 
 
+_POSITION_LABELS = {
+    "upstream": "上游",
+    "downstream": "下游",
+    "parallel": "平行替代",
+    "unknown": "位置未判定",
+}
+
+
+def _describe_selection(
+    primary: RouteCandidate | None, secondary: RouteCandidate | None
+) -> str:
+    """用一句話交代主/次線是怎麼挑出來的。
+
+    [2026-08-02] 這是「為什麼是這條」的答案。以前這個資訊只存在於
+    `sort_key` 這個區域函式裡，沒有任何管道離開 `plan_route()`。
+
+    實測缺口：長官問「為什麼建議走市民大道四段」，模型只能列出誰被排除，
+    答不出「為什麼不走飽和度更低的仁愛路四段」——正確答案是上游優先
+    （SOP-2 §2a(3)），而那句話系統從來沒說出口過。
+    """
+    if primary is None:
+        return "所有候選路段均被排除，無可行替代路線。"
+
+    rule = (
+        "篩選：容量 ≥ 1000 vph、與事故路段直接相鄰、位於事故點上游（SOP-2 §2a）；"
+        "排序：上游候選優先，同組內飽和度低者優先，飽和度相同時取容量大者。"
+    )
+    pos = _POSITION_LABELS.get(primary.position or "unknown", "位置未判定")
+    detail = (
+        f"主線 {primary.name} 為{pos}候選中飽和度最低者"
+        f"（{primary.saturation_score}）。"
+    )
+    if secondary is not None:
+        spos = _POSITION_LABELS.get(secondary.position or "unknown", "位置未判定")
+        if primary.position == "upstream" and secondary.position == "downstream":
+            detail += (
+                f"次線 {secondary.name} 飽和度較低（{secondary.saturation_score}）"
+                f"但位於{spos}，依上游優先原則列為次線。"
+            )
+        else:
+            detail += f"次線 {secondary.name}（{spos}，飽和度 {secondary.saturation_score}）。"
+    return rule + " " + detail
+
+
 def plan_route(request: RouteRequest) -> RoutePlan:
     """R1-R5 主流程。
 
@@ -153,6 +197,12 @@ def plan_route(request: RouteRequest) -> RoutePlan:
                 within_60_second_sla=elapsed <= 60000,
             )
 
+    # 不能走的路段集合：事故本身 + 呼叫端指定的額外封閉（見 RouteRequest）
+    closed_segments = {incident.affected_segment}
+    if incident.affected_road:
+        closed_segments.add(incident.affected_road)
+    closed_segments.update(request.extra_closed_segments or [])
+
     # 取得事故路段的 alternatives
     alternative_ids = affected_seg.alternatives
 
@@ -176,11 +226,12 @@ def plan_route(request: RouteRequest) -> RoutePlan:
     #   RD_TPE_002 → 篩得到市民大道四段、仁愛路四段 → 黃金值保住
     #   RD_TPE_003 → 篩完是空的 → 放寬用完整 alternatives → 10 條路段有救
     # 放寬時會記一筆 finding，讓指揮官知道這些路線不是直接相鄰的。
+    # 這裡的排除條件必須跟下面迴圈**完全一致**（用同一個 closed_segments），
+    # 否則會出現「預判有相鄰候選、實際跑完卻一條都不剩」的矛盾。
     _direct_ok = [
         a for a in alternative_ids
         if a in segment_map
-        and a != incident.affected_segment
-        and a != incident.affected_road
+        and a not in closed_segments
         and segment_map[a].capacity_vph >= 1000
         and _is_directly_intersecting(segment_map[a].name, affected_seg.intersections)
     ]
@@ -222,9 +273,11 @@ def plan_route(request: RouteRequest) -> RoutePlan:
         sat, snapshot_at = _get_saturation_snapshot(bundle, alt_id, as_of)
 
         # R3 step 2: 非事故或封閉道路
-        if alt_id == incident.affected_segment or (
-            incident.affected_road and alt_id == incident.affected_road
-        ):
+        #
+        # [2026-08-02] `closed_segments` 除了事故本身，還包含呼叫端傳入的
+        # `extra_closed_segments`（疊加情境：另一起事件、或使用者假設的第二條
+        # 封閉路段）。少了這一段，系統會把一條剛被假設封閉的路推薦成替代路線。
+        if alt_id in closed_segments:
             candidate = RouteCandidate(
                 segment_id=alt_id, name=seg.name, eligible=False,
                 reason_code="CLOSED", saturation_score=sat,
@@ -308,6 +361,7 @@ def plan_route(request: RouteRequest) -> RoutePlan:
                 segment_id=alt_id, name=seg.name, eligible=False,
                 reason_code="SATURATED", saturation_score=sat,
                 capacity_vph=seg.capacity_vph, snapshot_at=snapshot_at,
+                position=position,
             )
             all_candidates.append(candidate)
             # 暫存，R4 會決定是否保留（parallel 視為 upstream 優先級）
@@ -323,6 +377,7 @@ def plan_route(request: RouteRequest) -> RoutePlan:
             segment_id=alt_id, name=seg.name, eligible=True,
             reason_code=None, saturation_score=sat,
             capacity_vph=seg.capacity_vph, snapshot_at=snapshot_at,
+            position=position,
         )
         all_candidates.append(candidate)
 
@@ -399,6 +454,7 @@ def plan_route(request: RouteRequest) -> RoutePlan:
                     saturation_score=cand.saturation_score,
                     capacity_vph=cand.capacity_vph,
                     snapshot_at=cand.snapshot_at,
+                    position=cand.position,
                 )
                 retained_list.append(retained_new)
                 excluded = [e for e in excluded if e.segment_id != cand.segment_id]
@@ -428,6 +484,7 @@ def plan_route(request: RouteRequest) -> RoutePlan:
     elapsed = int((time.perf_counter() - start_time) * 1000)
 
     return RoutePlan(
+        selection_rule=_describe_selection(primary, secondary),
         primary=primary,
         secondary=secondary,
         excluded=excluded,

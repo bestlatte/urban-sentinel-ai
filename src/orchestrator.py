@@ -23,6 +23,7 @@ from typing import Protocol
 logger = logging.getLogger(__name__)
 _TZ_TAIPEI = timezone(timedelta(hours=8))
 
+from src import clock
 from src.models import (
     BedrockAdvisory,
     DecisionResult,
@@ -670,7 +671,7 @@ def handle_trigger_batch(batch: list[dict]) -> DecisionResult:
 
     # 產生 trace_id
     _STATE.cycle_counter += 1
-    trace_id = f"TR-{datetime.now(_TZ_TAIPEI).strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
+    trace_id = f"TR-{clock.now().strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
 
     # 開啟 trace
     from src.decision_trace import open_trace, record_step
@@ -921,7 +922,7 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
 
     # --- 1. OPEN ---
     _STATE.cycle_counter += 1
-    trace_id = f"TR-{datetime.now(_TZ_TAIPEI).strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
+    trace_id = f"TR-{clock.now().strftime('%Y%m%d-%H%M')}-{_STATE.cycle_counter:04d}"
 
     # A1 分類
     classification = classify_incident(event)
@@ -1277,34 +1278,50 @@ _TRACE_DEAD_ENDS = ("無法識別", "有多種可能")
 """
 
 
+_STRUCTURED_INTENTS = frozenset(
+    {"whatif_simulation", "sop_query", "scenario_report", "report_followup"}
+)
+"""哪些回答可以帶結構化附件（風險推演時間軸）。
+
+`chitchat`（「你是誰」「今天天氣如何」）與 `error` 不在內。前端
+`chat-render.js::_ATTACHMENTLESS_INTENTS` 是同一條線的另一側，兩邊都要擋——
+後端擋是為了不送出使用者沒有要的資料，前端擋是為了任何來源的 payload
+（含 WS 冗餘推播）都畫不出多餘的區塊。
+
+`report_followup` 在內：那是「已經有建議書，直接引用不重算」的追問
+（見 `response_formatter.classify_no_tool_intent()`），使用者問的就是這起事件，
+該週期的風險推演正是他要的東西。它沒有工具結果所以畫不出決策卡片，但推演要給。
+"""
+
+
 def _attach_trace(response, trace_id: str | None):
-    """把決策軌跡掛到對話回覆上（就地修改並回傳）。
+    """把當前週期的風險推演掛到對話回覆上（就地修改並回傳）。
 
-    [2026-08-01 新增] 使用者反映「chatbot 的回答沒有顯示決策軌跡」。原因是軌跡
-    從來沒有離開過後端記憶體：`decision_trace` 只被 M4B 生成層讀，`W1Response`
-    沒有對應欄位，前端自然畫不出來。
+    [2026-08-02 兩處修正]
+    ---------------------
+    1. **不再送決策軌跡**。原本這裡會填 `response.trace_steps`，前端把它畫成
+       一條時間軸。對話框拿掉那個區塊了（理由見 `chat-render.js`），後端就不該
+       繼續送——留著只是讓 payload 帶著一份沒有人讀的稽核資料到處跑。
+       `decision_trace` 模組本身不動，M4B 生成層與 `/api/trace/{id}` 還在用。
 
-    掛在**所有**帶 trace_id 的回覆上，不只回溯分支——使用者問完 What-if 之後
-    同樣會想知道「那正式決策當初是怎麼判的」，而那份軌跡就在手邊。
+    2. **風險推演改成看 `intent_type`**。原本是「只要有 trace_id 就掛」，於是
+       使用者問「你是誰」，回覆下面跟著一張後續風險推演時間軸——那張圖講的是
+       另一起事件，出現在閒聊底下只會讓人以為系統把問題聽成別的東西了。
 
-    取不到軌跡（trace 不存在、伺服器重啟過）只是少一塊內容，絕不能中斷回覆。
+    推演直接沿用該週期已經算好的那一份，不重算——重算會得到同樣的結果
+    （純函式），但兩份輸出若因為任何原因出現差異，使用者會同時看到兩張
+    不一致的圖，那比沒有圖更糟。
+
+    取不到（trace 不存在、伺服器重啟過）只是少一塊內容，絕不能中斷回覆。
     """
     if trace_id is None:
         return response
 
-    try:
-        from src.decision_trace import get_trace_view
+    response.trace_id = trace_id
 
-        view = get_trace_view(trace_id)
-        if view:
-            response.trace_id = trace_id
-            response.trace_steps = view["steps"]
-    except Exception:  # noqa: BLE001
-        logger.debug("取得決策軌跡失敗，回覆不帶軌跡", exc_info=True)
+    if getattr(response, "intent_type", None) not in _STRUCTURED_INTENTS:
+        return response
 
-    # 風險推演直接沿用該週期已經算好的那一份，不重算——重算會得到同樣的結果
-    # （純函式），但兩份輸出若因為任何原因出現差異，使用者會同時看到兩張
-    # 不一致的圖，那比沒有圖更糟。
     try:
         for rec in _STATE.active_incidents.values():
             if rec.trace_id == trace_id and rec.decision_result is not None:
@@ -1386,37 +1403,57 @@ def handle_user_query(
     `ws_broadcaster` 轉傳給 `process_whatif_request()` 供 loading 推播。
     """
     from src.agent.whatif_agent import process_whatif_request
-    from src.decision_trace import answer_trace_query, resolve_segment_id
 
     # 一律設定：W1 靠這個 ContextVar 找到使用者正在看的決策週期，
     # 沒設的話 `simulate_scenario` 拿不到 incident，路線與 ETE 全部算不出來。
     _current_trace_ctx.set(current_trace_id)
 
-    is_forward_looking = any(word in question for word in _FORWARD_LOOKING_WORDS)
-
-    if not is_forward_looking and current_trace_id is not None:
-        # 回溯追問只在「問題明確指向某個路段」時才走——這是 M4B 的能力邊界
-        # （它的檢索鍵就是 segment_id）。解析不到就別硬送，那只會得到
-        # 「無法識別問題中提及的路段」這種對使用者毫無用處的回覆。
-        resolved = resolve_segment_id(question)
-        if resolved not in ("NOT_FOUND", "AMBIGUOUS"):
-            answer_text = answer_trace_query(current_trace_id, question)
-            if not any(dead in answer_text for dead in _TRACE_DEAD_ENDS):
-                return {
-                    "message_type": "trace.answered.v1",
-                    "payload": _trace_answer_payload(current_trace_id, answer_text),
-                }
-            # 落到下面走 W1——回溯答不出來不代表沒人答得出來
-
+    # [2026-08-02 移除 M4B 回溯分支：一律走 W1]
+    # ------------------------------------------
+    # 原本的規則是「非前瞻問題 + 有 trace_id + 問題裡解析得到路段 → 走 M4B」。
+    # 立意是「讀真實決策紀錄比讓 Agent 重新推論可靠」。實測後這條規則產生了
+    # 一個完全顛倒的結果：**問題問得越具體，答案越差**。
+    #
+    #   「這起事件怎麼處理？」        → 解析不到路段 → W1 → 完整引用建議書 ✅
+    #   「為什麼不走比較空的仁愛路？」 → 解析到 RD_TPE_005 → M4B → ❌
+    #        實測回覆：「紀錄中未包含仁愛路四段的評估資訊」
+    #        ——但仁愛路四段就是這次決策的次線。
+    #
+    # 原因是 M4B 手上只有決策軌跡，而 W1 手上有：
+    #   決策軌跡（一樣有）＋ 事實區塊（含路線選擇規則）＋ 風險推演
+    #   ＋ 建議書全文 ＋ query_sop / simulate_scenario 兩個工具
+    #
+    # W1 的 context 是 M4B 的超集，「讀真實紀錄比較可靠」這個理由已經不成立
+    # ——軌跡本來就在 W1 的 context 裡（見 `_attach_trace`）。維持兩套答題
+    # 邏輯的成本，就是讓最自然的追問落到能力較弱的那一套。
+    #
+    # `answer_trace_query()` / `resolve_segment_id()` 本身保留（M4B 生成層的
+    # 一部分，也還有測試涵蓋），只是對話路徑不再分流過去。
     result = process_whatif_request(
         session_id=session_id,
         content=question,
         correlation_id=correlation_id,
         ws_broadcaster=ws_broadcaster,
     )
-    # W1 的回覆同樣掛上軌跡：使用者問完假設情境之後，緊接著想知道「那正式決策
-    # 當初是怎麼判的」是很自然的，軌跡就在手邊沒理由不給。
-    _attach_trace(result, current_trace_id)
+
+    # [2026-08-02] 回報**實際依據**的那個決策週期，不是前端傳來的那個。
+    #
+    # 前端有沒有傳 `current_trace_id` 已經不是開關了：W1 會自己從
+    # `active_incidents` 挑一份有建議書的（見 `_current_incident_record()`）。
+    # 但這裡原本仍拿 `current_trace_id` 去掛，於是前端沒傳時回覆的 `trace_id`
+    # 是 None——答案明明引用了某一份建議書，payload 卻說「我沒有依據任何週期」。
+    # 出問題時對不上帳。
+    effective_trace_id = current_trace_id
+    try:
+        from src.agent.whatif_agent import _current_incident_record
+
+        record = _current_incident_record()
+        if record is not None:
+            effective_trace_id = record.trace_id
+    except Exception:  # noqa: BLE001 - 對不到就沿用前端傳的，不影響回答本身
+        logger.debug("解析實際依據的決策週期失敗", exc_info=True)
+
+    _attach_trace(result, effective_trace_id)
     return {"message_type": "whatif.evaluated.v1", "payload": result}
 
 
@@ -1831,7 +1868,7 @@ def resolve_incident(event_id: str, new_status: str = "Resolved") -> ResolveResu
 
     # 記錄被釋放的路段
     freed_segment = record.incident.affected_road or record.incident.affected_segment
-    resolved_at = datetime.now(_TZ_TAIPEI)
+    resolved_at = clock.now()
 
     # 更新事件狀態
     record.incident.status = new_status

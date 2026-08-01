@@ -40,6 +40,17 @@ function renderSeverityOptions(hypo, opts) {
     }</span>
   </div>`;
 
+  // 疊加情境要把基準講出來。少了這一句，使用者會以為系統忘了那起
+  // 還在進行中的真實事件——而所有數字其實都是建立在它之上算的。
+  if (hypo.base_incident) {
+    const b = hypo.base_incident;
+    html += `<div class="sev-base">
+      疊加於進行中事件
+      <strong>${escapeHtml(b.segment_name || b.segment_id || "")}</strong>
+      （${escapeHtml(b.event_id || "")}）尚未排除
+    </div>`;
+  }
+
   if (!opts || opts.length === 0) {
     // 使用者已經講明嚴重度，沒有選項要挑
     html += `</div>`;

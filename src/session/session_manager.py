@@ -7,7 +7,7 @@ user_message 參數，沒有 _pending_message 暫存機制）。
 
 from __future__ import annotations
 
-from datetime import datetime
+from src import clock
 
 from src.session.models import Session, Turn, W1Context
 
@@ -55,7 +55,7 @@ def record_response(
     turn = Turn(
         user_message=user_message,
         ai_response=ai_response,
-        timestamp=datetime.now(),
+        timestamp=clock.now(),
         triggered_sops=triggered_sops or [],
     )
     session.history.append(turn)

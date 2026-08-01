@@ -48,7 +48,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
-from src import orchestrator  # noqa: E402
+from src import clock, orchestrator  # noqa: E402
 from src.ws_manager import ConnectionManager  # noqa: E402
 
 app = FastAPI()
@@ -629,13 +629,19 @@ async def get_dashboard():
     avg_sat = sum(saturations) / len(saturations) if saturations else None
 
     # SOP-6 觸發站點數
+    #
+    # [2026-08-02] 這裡原本用 `datetime.now()`（真實時間）去查漫遊比率，
+    # 而 `get_roaming_ratio()` 是 as-of 查詢——它會找**最接近該時刻**的那筆
+    # 人流資料。Demo 在下午跑、資料集是晚上 17:00~23:30 的，於是這個數字
+    # 一直是拿資料集邊界的那筆算出來的，跟畫面上的時刻無關。
+    # 改讀 `clock.now()`：模擬器跑到幾點，就算幾點的漫遊比率。
+    from src.clock import now as _clock_now
     from src.rules import get_roaming_ratio
-    tz = timezone(timedelta(hours=8))
-    now = datetime.now(tz=tz)
+    as_of = _clock_now()
     all_stations = {c.station_id for c in bundle.crowd}
     multilingual_count = sum(
         1 for sid in all_stations
-        if (r := get_roaming_ratio(bundle, sid, now)) is not None and r >= 0.30
+        if (r := get_roaming_ratio(bundle, sid, as_of)) is not None and r >= 0.30
     )
 
     # 系統模式
@@ -973,35 +979,6 @@ def _get_data_time_range():
     return min(all_times), max(all_times)
 
 
-_SIM_CURSOR_LEAD_MINUTES = 10
-"""模擬器起播位置要落在第一起事件前多久。
-
-留一點前置時間讓使用者看到時鐘在跑、確認模擬器真的在動，然後事件才出現——
-直接從事件時間開始播的話，按下播放就跳出一堆按鈕，反而看不出因果。
-"""
-
-
-def _default_sim_cursor(start_time: datetime) -> datetime:
-    """模擬器按下「啟動」後游標該停在哪裡。
-
-    見 `start_simulation()` 的說明：資料起點（17:00）距離第一起事件（22:00）
-    有 5 小時，從那裡起播會讓事件注入面板空白到讓人以為壞了。
-
-    取不到事件時間就退回資料起點——沒有事件的資料集本來就沒有這個問題。
-    """
-    try:
-        bundle = orchestrator.GATEWAY.load_data()
-        event_times = [i.timestamp for i in bundle.incidents]
-        if not event_times:
-            return start_time
-        cursor = min(event_times) - timedelta(minutes=_SIM_CURSOR_LEAD_MINUTES)
-        # 不得早於資料起點，否則查不到任何 as-of 快照
-        return max(cursor, start_time)
-    except Exception as e:  # noqa: BLE001
-        logger.warning(f"計算模擬器起播位置失敗，改用資料起點: {e}")
-        return start_time
-
-
 def get_simulation_time():
     """取得當前模擬時間（供其他模組使用）"""
     if _simulation_state["enabled"] and _simulation_state["current_time"]:
@@ -1021,7 +998,7 @@ async def _check_cascade_impact(new_incident) -> None:
         return
     
     state = orchestrator.get_global_state()
-    as_of = new_incident.timestamp or datetime.now(_TZ_TAIPEI)
+    as_of = new_incident.timestamp or clock.now()
     
     for event_id, record in list(state.active_incidents.items()):
         if event_id == new_incident.event_id:
@@ -1192,9 +1169,10 @@ async def update_incident(event_id: str, body: dict):
     if not changes:
         return JSONResponse(content={"status": "ok", "message": "無變更"})
     
-    # 重新評估
+    # 重新評估。用模擬器時刻——事件狀態變更是在被模擬的世界裡發生的，
+    # 拿真實時間重算會在另一個時段的路況上算路線。
     bundle = orchestrator.GATEWAY.load_data()
-    as_of = datetime.now(_TZ_TAIPEI)
+    as_of = clock.now()
     
     # 重新計算 ETE
     new_ete = orchestrator.GATEWAY.calculate_ete(record.incident, bundle)
@@ -1295,17 +1273,13 @@ async def start_simulation(body: dict = None):
     _simulation_state["enabled"] = True
     _simulation_state["start_time"] = start_time
     _simulation_state["end_time"] = end_time
-    # 起始播放位置刻意**不是**資料起點。
+    # 起播位置一律是資料起點，不做任何「聰明」的預設。
     #
-    # [2026-08-01] 資料從 17:00 開始，但最早的事件在 22:00——中間隔了 5 小時。
-    # 事件注入面板只列出「時間已到」的事件（`GET /api/incidents?as_of=`），
-    # 所以從 17:00 開始播的話，得等 5 小時的模擬時間才會有第一顆按鈕出現：
-    # 預設速度 1 秒 = 1 分鐘，就是真的坐在螢幕前等 5 分鐘，畫面上只有
-    # 「請啟動時間模擬器」。實測就是這樣，看起來像事件注入壞掉了。
-    #
-    # 時間軸範圍仍然是完整的 17:00~23:30（滑桿、圖表都不受影響），
-    # 只有「現在播到哪裡」改成第一起事件前 10 分鐘，按下播放很快就有東西可注入。
-    _simulation_state["current_time"] = _default_sim_cursor(start_time)
+    # [2026-08-01] 曾經改成自動跳到第一起事件前 10 分鐘（因為資料 17:00 起、
+    # 最早事件 22:00，從頭播要等很久才有事件可注入）。使用者明確要求拿掉——
+    # 他要自己拉時間軸決定看哪一段，系統不該替他挑起點。
+    # 需要快轉就拉滑桿（`POST /api/simulation/seek`）。
+    _simulation_state["current_time"] = start_time
     _simulation_state["speed"] = body.get("speed", 60)  # 預設 1 秒跑 1 分鐘
     _simulation_state["playing"] = False
     _simulation_state["last_level"] = None
@@ -1315,10 +1289,9 @@ async def start_simulation(body: dict = None):
     global _last_traffic_level
     _last_traffic_level = None
     
-    # 推播初始狀態。
-    # `current_time` 必須回報**實際游標**而不是 `start_time`——兩者現在不同了
-    # （見上方 `_default_sim_cursor`）。回錯的話前端時鐘顯示 17:00、
-    # 事件列表卻用 21:50 去查，畫面自相矛盾。
+    # 推播初始狀態。讀 `_simulation_state` 的實際值而不是再寫一次 `start_time`：
+    # 兩者目前相同，但只要有人動了起播邏輯，這裡就會自動跟上，
+    # 不會出現「時鐘顯示一個時間、事件列表用另一個時間去查」的矛盾畫面。
     cursor = _simulation_state["current_time"]
     await ws_manager.broadcast({
         "message_type": "simulation.state.v1",
@@ -1535,10 +1508,20 @@ async def generate_incident():
             "errors": [{"code": "INTERNAL_ERROR", "message": "無可用路段資料"}],
         })
 
-    # 使用交通資料時間範圍內的隨機時間（而非系統當前時間）
-    # 這樣 as-of 查詢才會拿到合理的飽和度資料
+    # 事件發生時刻。
+    #
+    # [2026-08-02] 模擬器在跑的時候，事件就發生在**畫面上的那一刻**。
+    # 原本一律在資料時間範圍內隨機挑一個時間點，於是模擬器停在 22:10、
+    # 按下產生事件，事件卻標成 19:47——路況、ETE、建議書全部算在那個時刻，
+    # 而畫面上顯示的是 22:10。使用者看到的是兩套對不起來的數字。
+    #
+    # 隨機挑時間這個行為本身是有理由的（真實時間落在資料範圍外，as-of 查詢
+    # 會拿到邊界值），所以模擬器沒在跑時保留原邏輯當退路。
     traffic_timestamps = [t.timestamp for t in bundle.traffic]
-    if traffic_timestamps:
+    sim_time = clock.simulation_time()
+    if sim_time is not None:
+        event_time = sim_time
+    elif traffic_timestamps:
         min_ts = min(traffic_timestamps)
         max_ts = max(traffic_timestamps)
         # 在資料範圍內隨機選一個時間點
@@ -1546,7 +1529,7 @@ async def generate_incident():
         random_offset = random.randint(0, max(1, delta_seconds))
         event_time = min_ts + timedelta(seconds=random_offset)
     else:
-        event_time = datetime.now(tz=tz)
+        event_time = clock.now()
 
     # 隨機選擇事件類型
     event_config = random.choice(_EVENT_TYPES)

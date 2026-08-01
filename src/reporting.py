@@ -122,10 +122,29 @@ def build_facts_block(
         f"命中SOP條款: {', '.join(sorted({h.clause_id for h in sensing.rule_hits}))}",
     ]
 
+    # 路線：連同「為什麼是它」一起給。
+    #
+    # [2026-08-02] 原本只寫主線/次線是誰、誰被排除，**沒有交代選擇規則**。
+    # 實測缺口：ACC_001 主線是市民大道四段（飽和度 0.78）、次線是仁愛路四段
+    # （0.65）。長官問「為什麼不走比較空的那條」——正確答案是 SOP-2 §2a(3)
+    # 的上游優先，但那條資訊從沒進過事實區塊，模型只能猜或含糊帶過。
+    _pos = {"upstream": "上游", "downstream": "下游", "parallel": "平行替代"}
     if route_plan and route_plan.primary:
-        lines.append(f"主要替代路線: {route_plan.primary.name} ({route_plan.primary.segment_id})")
+        p = route_plan.primary
+        lines.append(
+            f"主要替代路線: {p.name} ({p.segment_id})"
+            f"，飽和度 {p.saturation_score}、容量 {p.capacity_vph} vph"
+            f"、位置 {_pos.get(p.position or '', '未判定')}"
+        )
     if route_plan and route_plan.secondary:
-        lines.append(f"次要替代路線: {route_plan.secondary.name} ({route_plan.secondary.segment_id})")
+        s = route_plan.secondary
+        lines.append(
+            f"次要替代路線: {s.name} ({s.segment_id})"
+            f"，飽和度 {s.saturation_score}、容量 {s.capacity_vph} vph"
+            f"、位置 {_pos.get(s.position or '', '未判定')}"
+        )
+    if route_plan and route_plan.selection_rule:
+        lines.append(f"路線選擇規則: {route_plan.selection_rule}")
     if route_plan:
         for exc in route_plan.excluded:
             reason_text = _reason_code_to_text(exc.reason_code, exc)
@@ -602,12 +621,20 @@ def _generate_notification_with_llm(
     )
 
     if multilingual:
+        # 明確告知「已經判定要多語」，不讓模型自己決定——它手上沒有漫遊比率，
+        # 只能猜，而規則引擎早就算出來了。見 prompts/notification.txt 第 5 條。
         user_message = (
-            f"請根據以下事實生成中文、英文、日文、韓文四個版本的交通簡訊通知（各不超過100字/160字元）：\n\n{facts}\n\n"
-            f"請以 JSON 格式回覆：{{\"zh\": \"...\", \"en\": \"...\", \"ja\": \"...\", \"ko\": \"...\"}}"
+            "本事件已由規則引擎判定觸發 SOP-6（漫遊比率 ≥ 0.30），"
+            "**必須**產出中文、英文、日文、韓文四個版本，四個欄位都不得留空。\n\n"
+            f"事實資料（各版本不超過 100 字／160 字元）：\n\n{facts}\n\n"
+            '只回覆 JSON，不要加說明文字：'
+            '{"zh": "...", "en": "...", "ja": "...", "ko": "..."}'
         )
     else:
-        user_message = f"請根據以下事實生成中文交通簡訊通知（不超過100字）：\n\n{facts}"
+        user_message = (
+            "本事件未觸發 SOP-6，只需中文版本。\n\n"
+            f"請根據以下事實生成中文交通簡訊通知（不超過100字）：\n\n{facts}"
+        )
 
     # 走 `_invoke_bedrock_converse` 而不是直接呼叫 `llm.invoke_converse`：
     # 那個名字是既有的**測試接縫**（tests/test_a2_agent.py 以 monkeypatch 攔它
@@ -615,22 +642,40 @@ def _generate_notification_with_llm(
     # 變成 29 秒，而且變成依賴憑證與連線。
     text = _invoke_bedrock_converse(system_prompt, user_message)
 
-    # 嘗試解析 JSON（多語時）
-    if multilingual:
-        import json
-        try:
-            start = text.find("{")
-            end = text.rfind("}") + 1
-            if start >= 0 and end > start:
-                parsed = json.loads(text[start:end])
-                return Notification(
-                    zh=parsed.get("zh", text),
-                    en=parsed.get("en"),
-                    ja=parsed.get("ja"),
-                    ko=parsed.get("ko"),
-                )
-        except (json.JSONDecodeError, KeyError):
-            pass
+    if not multilingual:
         return Notification(zh=text, en=None, ja=None, ko=None)
-    else:
-        return Notification(zh=text, en=None, ja=None, ko=None)
+
+    # 解析 JSON（多語時）。
+    #
+    # [2026-08-02] 這一段原本是 `except (JSONDecodeError, KeyError): pass` 然後
+    # 回傳只有中文的 Notification——**完全靜默**。實測結果是同一起事件有時四語
+    # 齊全、有時只剩中文，而畫面上、日誌裡都沒有任何跡象顯示發生過什麼。
+    #
+    # 現在兩件事都做：解析失敗要出聲；解析成功但語言不齊也算失敗（拋例外讓
+    # 呼叫端走模板保底，模板是確定性的，一定給得出四語）。寧可用模板的制式
+    # 句子，也不要給指揮官一份「說好四語但只有中文」的通報。
+    import json
+
+    parsed: dict | None = None
+    try:
+        start = text.find("{")
+        end = text.rfind("}") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(text[start:end])
+    except json.JSONDecodeError as e:
+        logger.warning("C4 多語 JSON 解析失敗，改用模板保底: %s；原始回覆前 200 字：%s",
+                       e, text[:200])
+
+    if not isinstance(parsed, dict):
+        raise ValueError("C4 多語通報未取得合法 JSON")
+
+    missing = [k for k in ("zh", "en", "ja", "ko") if not parsed.get(k)]
+    if missing:
+        # 模型自己決定「這次不用多語」是最常見的情況——它手上沒有漫遊比率。
+        # 提示詞已經改成明確告知，這裡是最後一道防線。
+        logger.warning("C4 多語通報缺少語言 %s，改用模板保底", missing)
+        raise ValueError(f"C4 多語通報缺少 {missing}")
+
+    return Notification(
+        zh=parsed["zh"], en=parsed["en"], ja=parsed["ja"], ko=parsed["ko"]
+    )
