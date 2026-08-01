@@ -26,8 +26,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderDashboard(data.payload);
     }
     if (data.traffic_samples) {
-      updateChartData(data.traffic_samples);
-      // 初始載入不餵飽和度給地圖，等事件注入或模擬器啟動後才顯示
+      // 初始載入不餵資料給圖表，保持空骨架；也不餵飽和度給地圖
     }
   } catch (e) {
     console.warn("初始 Dashboard 載入失敗:", e);
@@ -219,11 +218,17 @@ function onDecisionCompleted(decision) {
   _recordDecisionForActivity(decision);
   
   // 更新 F4 路網圖（傳入事件發生的路段 ID）
+  // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點（地圖上沒有座標）
+  const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
+  
   if (decision.routes) {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 有疏散路線：顯示路線 + 事件點
     updateMap(decision.routes, incidentSegmentId);
     // 同步更新地理圖
     if (typeof updateGeoMap === "function") updateGeoMap(decision.routes);
+  } else if (incidentSegmentId) {
+    // 沒有疏散路線（如 SOP-4 大型活動散場）：只標示事件發生點
+    updateMap(null, incidentSegmentId);
   }
   // 標記事故在地理圖上
   if (decision.incident && typeof markIncidentOnGeoMap === "function") {
@@ -285,7 +290,8 @@ function _handleReplanDecisionUpdate(decision, eventId) {
   
   // 更新 F4 路網圖
   if (decision.routes) {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
     console.log(`[_handleReplanDecisionUpdate] 更新地圖，事件路段: ${incidentSegmentId}`);
     updateMap(decision.routes, incidentSegmentId);
   }
@@ -520,8 +526,10 @@ function showAlertModal(payload) {
   let roadName, description, extraInfo;
   
   if (isIncidentAlert) {
-    // 事件注入的彈窗
-    roadName = "事件通報";
+    // 事件注入的彈窗：顯示中文事件名稱
+    const typeName = _getShortType(payload.type || "");
+    const location = payload.location || "";
+    roadName = location ? `${typeName}（${location}）` : (typeName || "事件通報");
     description = payload.description || "決策完成";
     extraInfo = payload.ete_minutes ? `預計恢復時間：${payload.ete_minutes} 分鐘` : "";
   } else {
@@ -877,10 +885,16 @@ async function injectIncident(eventId) {
       onDecisionCompleted(decision);
       
       // ★ 確保地圖立即更新（傳入事件發生的路段 ID）
+      // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+      const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
+      console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}, routes: ${decision.routes ? '有' : '無'}`);
+      
       if (decision.routes) {
-        const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
-        console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}`);
+        // 有疏散路線：顯示路線 + 事件點
         updateMap(decision.routes, incidentSegmentId);
+      } else if (incidentSegmentId) {
+        // 沒有疏散路線：只標示事件發生點
+        updateMap(null, incidentSegmentId);
       }
       // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
     }
@@ -958,15 +972,22 @@ function _renderReportContent(decision) {
   }
   if (decision.routes) {
     html += `<div style="margin-top:10px;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">`;
-    if (decision.routes.primary) {
-      const isChanged = decision.routes.primary._changedAt;
-      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
-      html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}${changeNote}</div>`;
-    }
-    if (decision.routes.secondary) {
-      const isChanged = decision.routes.secondary._changedAt;
-      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
-      html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}${changeNote}</div>`;
+    if (decision.routes.no_feasible_route) {
+      html += `<div style="margin-top:4px;padding:8px 10px;background:#F9F0D4;border:1px solid hsl(45,93%,47%);border-radius:6px">`;
+      html += `<div style="font-size:0.7rem;color:hsl(45,80%,30%);font-weight:700">⚠️ 無可用替代路線</div>`;
+      html += `<div style="font-size:0.65rem;color:#4a3728;margin-top:4px">所有候選路段皆已排除，請立即啟動人工指揮或封閉區域</div>`;
+      html += `</div>`;
+    } else {
+      if (decision.routes.primary) {
+        const isChanged = decision.routes.primary._changedAt;
+        const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+        html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}${changeNote}</div>`;
+      }
+      if (decision.routes.secondary) {
+        const isChanged = decision.routes.secondary._changedAt;
+        const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+        html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}${changeNote}</div>`;
+      }
     }
     html += `</div>`;
   }
@@ -1157,7 +1178,8 @@ function switchReportTab(eventId) {
   _renderReportContent(decision);
   
   // ★ 同步更新 F4 路網圖
-  const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+  // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+  const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
   console.log(`[switchReportTab] 切換地圖到事件 ${eventId}, 事件路段: ${incidentSegmentId}, routes: ${decision.routes ? '有' : '無'}`);
   
   if (decision.routes) {
@@ -1933,7 +1955,8 @@ function onRoutesUpdated(payload) {
   
   // ★ 更新 F4 路網圖（傳入事件路段 ID）
   if (decision.routes && typeof updateMap === "function") {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
     console.log(`[路線重規劃] 更新地圖，事件路段: ${incidentSegmentId}`);
     updateMap(decision.routes, incidentSegmentId);
   }
@@ -1993,13 +2016,33 @@ function _showRouteUpdateAlert(payload) {
   const alertId = `alert-route-${++alertCounter}`;
   
   const oldPrimaryName = _getSegmentName(payload.old_primary) || payload.old_primary || "N/A";
-  const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || "N/A";
+  const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || null;
   const reason = payload.affected_route === "primary" ? "主路線飽和" : 
                  payload.affected_route === "secondary" ? "次路線飽和" : 
                  payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和";
   
+  // 如果沒有新路線可用，用黃色嚴重警告格式
+  if (!newPrimaryName) {
+    const alertEl = document.createElement("div");
+    alertEl.className = "alert-item level-medium";
+    alertEl.id = alertId;
+    alertEl.style.cssText = "border-left-color: hsl(45,93%,47%); background: #F9F0D4;";
+    alertEl.innerHTML = `
+      <div class="alert-item-header">
+        <span class="alert-item-level" style="color:hsl(45,80%,30%);font-weight:700">⚠️ 嚴重警告</span>
+        <span class="alert-item-time">${payload.time ? new Date(payload.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : ""}</span>
+      </div>
+      <div class="alert-item-road" style="color:#34271D;font-size:0.9rem;font-weight:700">無可用替代路線</div>
+      <div class="alert-item-desc" style="color:#4a3728;font-weight:500">事件 ${escapeHtml(payload.event_id || "")}：${escapeHtml(reason)}，已無可用替代路段</div>
+      <div class="alert-item-extra" style="color:#665244;font-weight:600">請立即啟動人工指揮或封閉區域</div>
+      <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')" style="background:#34271D;color:#F9F0D4;font-weight:600">確認</button>
+    `;
+    stack.appendChild(alertEl);
+    return;
+  }
+  
   const alertEl = document.createElement("div");
-  alertEl.className = "alert-item level-b";  // 用 B 級顏色表示警告
+  alertEl.className = "alert-item level-b";
   alertEl.id = alertId;
   alertEl.innerHTML = `
     <div class="alert-item-header">
@@ -2016,7 +2059,6 @@ function _showRouteUpdateAlert(payload) {
   `;
   
   stack.appendChild(alertEl);
-  // 路線更新提示需手動確認，不設自動關閉
 }
 
 // 輔助函式：從 segment_id 取得路段名稱

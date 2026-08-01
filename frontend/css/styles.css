@@ -95,6 +95,21 @@ body {
 /* F5 報告 tabs（事件選擇列）*/
 #f5-report-tabs {
   flex-shrink: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+#f5-report-tabs::-webkit-scrollbar {
+  height: 3px;
+}
+
+#f5-report-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#f5-report-tabs::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 #f5-report-content {

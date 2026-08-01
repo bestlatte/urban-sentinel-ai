@@ -739,6 +739,9 @@ async def evaluate_incident(body: dict):
             "level": decision_result.level,  # A/B/null（交通等級）
             "severity": incident.severity,    # Critical/High/Medium（事件嚴重度）
             "description": incident.description,
+            "type": incident.type,
+            "location": incident.location,
+            "event_id": incident.event_id,
             "ete_minutes": decision_result.ete.minutes if decision_result.ete else None,
         },
     })

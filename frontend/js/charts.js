@@ -39,10 +39,78 @@ function trendChartOptions() {
 
 function initCharts() {
   const container = document.getElementById("f1-charts");
-  if (!container) return;
+  if (!container || typeof Chart === "undefined") return;
 
-  // 初始不顯示圖表，等事件注入後才渲染長條圖
-  container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted,#846B58);font-size:0.82rem;font-weight:500;">匯入事件後顯示相關路段飽和度長條圖</div>`;
+  const canvas = document.createElement("canvas");
+  canvas.id = "traffic-chart";
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  container.innerHTML = "";
+  container.appendChild(canvas);
+
+  // 顯示空的長條圖骨架（座標軸+圖例，無資料）
+  trafficChart = new Chart(canvas.getContext("2d"), {
+    type: "bar",
+    data: {
+      labels: ["事件路段", "相鄰路段 1", "相鄰路段 2"],
+      datasets: [
+        {
+          label: "Avg Speed (km/h)",
+          data: [],
+          yAxisID: "ySpeed",
+          backgroundColor: "rgba(107, 73, 50, 0.78)",
+          borderColor: "#6B4932",
+          borderWidth: 1,
+          borderRadius: 5,
+          maxBarThickness: 26,
+        },
+        {
+          label: "Saturation Score",
+          data: [],
+          yAxisID: "ySaturation",
+          backgroundColor: "rgba(185, 107, 59, 0.72)",
+          borderColor: "#A85E34",
+          borderWidth: 1,
+          borderRadius: 5,
+          maxBarThickness: 26,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: { left: 10, right: 10, bottom: 10 } },
+      interaction: { mode: "index", intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: "top",
+          align: "end",
+          labels: { color: "#665244", boxWidth: 10, boxHeight: 10, usePointStyle: true, font: { size: 10 } },
+        },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: "#665244", font: { size: 9 } } },
+        ySpeed: {
+          beginAtZero: true,
+          position: "left",
+          suggestedMax: 60,
+          grid: { color: "rgba(107, 73, 50, 0.10)" },
+          ticks: { color: "#665244", font: { size: 9 } },
+          title: { display: true, text: "km/h", color: "#665244", font: { size: 9 } },
+        },
+        ySaturation: {
+          beginAtZero: true,
+          min: 0,
+          max: 1,
+          position: "right",
+          grid: { drawOnChartArea: false },
+          ticks: { color: "#A85E34", font: { size: 9 } },
+          title: { display: true, text: "Saturation", color: "#A85E34", font: { size: 9 } },
+        },
+      },
+    },
+  });
 }
 
 function updateChartData(trafficSamples) {
@@ -142,18 +210,8 @@ function setTrafficChartHeader(text) {
 async function updateTrafficChartForIncident(decision) {
   if (!decision?.incident) return;
 
-  // 確保 canvas 存在（initCharts 初始只放提示文字）
   const container = document.getElementById("f1-charts");
   if (!container) return;
-  let canvas = document.getElementById("traffic-chart");
-  if (!canvas) {
-    container.innerHTML = "";
-    canvas = document.createElement("canvas");
-    canvas.id = "traffic-chart";
-    canvas.style.width = "100%";
-    canvas.style.height = "100%";
-    container.appendChild(canvas);
-  }
 
   try {
     const [rows, topology] = await Promise.all([
