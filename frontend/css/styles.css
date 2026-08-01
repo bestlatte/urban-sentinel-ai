@@ -42,6 +42,11 @@ body {
   z-index: 50;
 }
 
+/* 隱藏 header 內的 page-nav（只保留側邊欄的） */
+#header > .page-nav {
+  display: none;
+}
+
 .header-left { display: flex; align-items: baseline; gap: 10px; }
 .header-title { font-size: 0.9rem; font-weight: 700; letter-spacing: -0.02em; }
 .header-subtitle { font-size: 0.72rem; color: var(--text-muted); font-weight: 400; }
@@ -1126,44 +1131,47 @@ body.side-nav-collapsed .page-content {
 }
 
 .alert-stack::-webkit-scrollbar-thumb {
-  background: hsl(0, 0%, 30%);
+  background: var(--border);
   border-radius: 2px;
 }
 
 .alert-item {
   pointer-events: auto;
-  background: hsl(0, 0%, 12%);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 16px 20px;
   min-width: 320px;
   max-width: 400px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(52, 39, 29, 0.25);
   animation: alertSlideIn 0.3s ease-out;
   position: relative;
 }
 
 .alert-item.level-a {
-  border-left: 4px solid hsl(0, 84%, 60%);
+  border-left: 4px solid var(--level-a);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), var(--bg-card));
 }
 
 .alert-item.level-b {
-  border-left: 4px solid hsl(25, 95%, 53%);
+  border-left: 4px solid var(--level-b);
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.08), var(--bg-card));
 }
 
 /* 事件嚴重度樣式：Critical（紅）、High（橘）、Medium（黃） */
 .alert-item.level-critical {
-  border-left: 4px solid hsl(0, 84%, 50%);
-  background: linear-gradient(135deg, hsla(0, 84%, 50%, 0.15), hsla(0, 0%, 15%, 0.95));
+  border-left: 4px solid var(--level-a);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), var(--bg-card));
 }
 
 .alert-item.level-high {
-  border-left: 4px solid hsl(25, 95%, 53%);
-  background: linear-gradient(135deg, hsla(25, 95%, 53%, 0.15), hsla(0, 0%, 15%, 0.95));
+  border-left: 4px solid var(--level-b);
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), var(--bg-card));
 }
 
 .alert-item.level-medium {
   border-left: 4px solid hsl(45, 93%, 47%);
-  background: linear-gradient(135deg, hsla(45, 93%, 47%, 0.15), hsla(0, 0%, 15%, 0.95));
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.1), var(--bg-card));
 }
 
 @keyframes alertSlideIn {
@@ -1179,10 +1187,10 @@ body.side-nav-collapsed .page-content {
 
 @keyframes alertPulse {
   0%, 100% {
-    box-shadow: 0 8px 32px rgba(239, 68, 68, 0.3);
+    box-shadow: 0 8px 32px rgba(239, 68, 68, 0.2);
   }
   50% {
-    box-shadow: 0 8px 48px rgba(239, 68, 68, 0.6);
+    box-shadow: 0 8px 48px rgba(239, 68, 68, 0.4);
   }
 }
 
@@ -1201,63 +1209,65 @@ body.side-nav-collapsed .page-content {
 }
 
 .alert-item.level-a .alert-item-level {
-  color: hsl(0, 84%, 60%);
+  color: var(--level-a);
 }
 
 .alert-item.level-b .alert-item-level {
-  color: hsl(25, 95%, 53%);
+  color: var(--level-b);
 }
 
 .alert-item.level-critical .alert-item-level {
-  color: hsl(0, 84%, 60%);
+  color: var(--level-a);
 }
 
 .alert-item.level-high .alert-item-level {
-  color: hsl(25, 95%, 53%);
+  color: var(--level-b);
 }
 
 .alert-item.level-medium .alert-item-level {
-  color: hsl(45, 93%, 55%);
+  color: hsl(45, 93%, 40%);
 }
 
 .alert-item-time {
   font-size: 0.72rem;
-  color: hsl(0, 0%, 50%);
+  color: var(--text-muted);
 }
 
 .alert-item-road {
   font-size: 0.9rem;
   font-weight: 600;
-  color: hsl(0, 0%, 90%);
+  color: var(--text);
   margin-bottom: 6px;
 }
 
 .alert-item-desc {
   font-size: 0.8rem;
-  color: hsl(0, 0%, 65%);
+  color: var(--text-secondary);
   margin-bottom: 12px;
 }
 
 .alert-item-close {
   padding: 6px 16px;
-  background: hsl(0, 0%, 25%);
-  color: hsl(0, 0%, 90%);
-  border: none;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 0.75rem;
   font-weight: 500;
-  transition: background 0.2s;
+  font-family: var(--font);
+  transition: all 0.2s;
 }
 
 .alert-item-close:hover {
-  background: hsl(0, 0%, 35%);
+  background: var(--border);
+  color: var(--text);
 }
 
 
 .alert-item-extra {
   font-size: 0.75rem;
-  color: hsl(0, 0%, 55%);
+  color: var(--text-muted);
   margin-top: 4px;
   margin-bottom: 8px;
 }
@@ -1269,23 +1279,23 @@ body.side-nav-collapsed .page-content {
   left: 0;
   right: 0;
   height: 3px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--border);
   border-radius: 0 0 10px 10px;
   overflow: hidden;
 }
 
 .alert-item-progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, rgba(255,255,255,0.4), rgba(255,255,255,0.2));
+  background: linear-gradient(90deg, var(--accent), var(--border));
   animation: alertProgressShrink 4s linear forwards;
 }
 
 .alert-item.level-a .alert-item-progress-bar {
-  background: linear-gradient(90deg, hsl(0, 84%, 60%), hsl(0, 84%, 45%));
+  background: linear-gradient(90deg, var(--level-a), hsl(0, 70%, 45%));
 }
 
 .alert-item.level-b .alert-item-progress-bar {
-  background: linear-gradient(90deg, hsl(25, 95%, 53%), hsl(25, 95%, 40%));
+  background: linear-gradient(90deg, var(--level-b), hsl(25, 80%, 40%));
 }
 
 @keyframes alertProgressShrink {
