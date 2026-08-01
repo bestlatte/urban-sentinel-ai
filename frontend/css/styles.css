@@ -63,7 +63,7 @@ body {
 }
 
 .col-left { display: flex; flex-direction: column; gap: 14px; }
-.col-right { display: flex; flex-direction: column; gap: 14px; height: calc(100vh - 80px); overflow: hidden; }
+.col-right { display: flex; flex-direction: column; gap: 14px; overflow-y: auto; }
 
 /* 右欄三個獨立區塊：Time Simulation / Event Injection / Advisory Report */
 #simulation-panel {
@@ -71,19 +71,18 @@ body {
 }
 
 #f3-inject {
-  flex: 0 1 auto;
-  max-height: 460px;
+  flex: 0 0 auto;
+  height: 580px;
   overflow: hidden;
 }
 
 #f3-inject .inject-panel-content {
-  max-height: 380px;
+  max-height: 520px;
   overflow-y: auto;
 }
 
 #f5-report {
-  flex: 1 1 auto;
-  min-height: 180px;
+  flex: 0 0 360px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -101,6 +100,8 @@ body {
 #f5-report-content {
   flex: 1 1 auto;
   overflow-y: auto;
+  min-height: 0;
+  max-height: 300px;
   font-size: 0.78rem;
   line-height: 1.7;
   color: var(--text-secondary);

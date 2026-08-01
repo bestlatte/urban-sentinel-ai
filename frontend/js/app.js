@@ -981,12 +981,6 @@ function _renderReportContent(decision) {
     html += `</div>`;
   }
 
-  // 建議書全文
-  if (decision.control_center_report) {
-    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:6px">FULL REPORT</div>`;
-    html += `<div style="font-size:0.75rem;line-height:1.7;color:var(--text-secondary);white-space:pre-wrap">${escapeHtml(decision.control_center_report)}</div>`;
-  }
-
   // 元資訊
   html += `<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">`;
   html += `<div style="font-size:0.62rem;color:var(--text-muted);display:flex;gap:16px;font-variant-numeric:tabular-nums">`;
