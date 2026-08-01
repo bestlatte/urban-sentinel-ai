@@ -26,8 +26,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       renderDashboard(data.payload);
     }
     if (data.traffic_samples) {
-      updateChartData(data.traffic_samples);
-      // 初始載入不餵飽和度給地圖，等事件注入或模擬器啟動後才顯示
+      // 初始載入不餵資料給圖表，保持空骨架；也不餵飽和度給地圖
     }
   } catch (e) {
     console.warn("初始 Dashboard 載入失敗:", e);
@@ -1892,13 +1891,33 @@ function _showRouteUpdateAlert(payload) {
   const alertId = `alert-route-${++alertCounter}`;
   
   const oldPrimaryName = _getSegmentName(payload.old_primary) || payload.old_primary || "N/A";
-  const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || "N/A";
+  const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || null;
   const reason = payload.affected_route === "primary" ? "主路線飽和" : 
                  payload.affected_route === "secondary" ? "次路線飽和" : 
                  payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和";
   
+  // 如果沒有新路線可用，用黃色嚴重警告格式
+  if (!newPrimaryName) {
+    const alertEl = document.createElement("div");
+    alertEl.className = "alert-item level-medium";
+    alertEl.id = alertId;
+    alertEl.style.cssText = "border-left-color: hsl(45,93%,47%); background: #F9F0D4;";
+    alertEl.innerHTML = `
+      <div class="alert-item-header">
+        <span class="alert-item-level" style="color:hsl(45,80%,30%);font-weight:700">⚠️ 嚴重警告</span>
+        <span class="alert-item-time">${payload.time ? new Date(payload.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : ""}</span>
+      </div>
+      <div class="alert-item-road" style="color:#34271D;font-size:0.9rem;font-weight:700">無可用替代路線</div>
+      <div class="alert-item-desc" style="color:#4a3728;font-weight:500">事件 ${escapeHtml(payload.event_id || "")}：${escapeHtml(reason)}，已無可用替代路段</div>
+      <div class="alert-item-extra" style="color:#665244;font-weight:600">請立即啟動人工指揮或封閉區域</div>
+      <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')" style="background:#34271D;color:#F9F0D4;font-weight:600">確認</button>
+    `;
+    stack.appendChild(alertEl);
+    return;
+  }
+  
   const alertEl = document.createElement("div");
-  alertEl.className = "alert-item level-b";  // 用 B 級顏色表示警告
+  alertEl.className = "alert-item level-b";
   alertEl.id = alertId;
   alertEl.innerHTML = `
     <div class="alert-item-header">
@@ -1915,7 +1934,6 @@ function _showRouteUpdateAlert(payload) {
   `;
   
   stack.appendChild(alertEl);
-  // 路線更新提示需手動確認，不設自動關閉
 }
 
 // 輔助函式：從 segment_id 取得路段名稱
