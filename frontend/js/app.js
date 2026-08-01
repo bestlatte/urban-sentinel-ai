@@ -954,15 +954,22 @@ function _renderReportContent(decision) {
   }
   if (decision.routes) {
     html += `<div style="margin-top:10px;font-size:0.72rem;display:flex;flex-direction:column;gap:2px">`;
-    if (decision.routes.primary) {
-      const isChanged = decision.routes.primary._changedAt;
-      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
-      html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}${changeNote}</div>`;
-    }
-    if (decision.routes.secondary) {
-      const isChanged = decision.routes.secondary._changedAt;
-      const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
-      html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}${changeNote}</div>`;
+    if (decision.routes.no_feasible_route) {
+      html += `<div style="margin-top:4px;padding:8px 10px;background:#F9F0D4;border:1px solid hsl(45,93%,47%);border-radius:6px">`;
+      html += `<div style="font-size:0.7rem;color:hsl(45,80%,30%);font-weight:700">⚠️ 無可用替代路線</div>`;
+      html += `<div style="font-size:0.65rem;color:#4a3728;margin-top:4px">所有候選路段皆已排除，請立即啟動人工指揮或封閉區域</div>`;
+      html += `</div>`;
+    } else {
+      if (decision.routes.primary) {
+        const isChanged = decision.routes.primary._changedAt;
+        const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+        html += `<div><span style="color:hsl(142,71%,45%)">●</span> ${escapeHtml(decision.routes.primary.name)}${changeNote}</div>`;
+      }
+      if (decision.routes.secondary) {
+        const isChanged = decision.routes.secondary._changedAt;
+        const changeNote = isChanged ? ` <span style="font-size:0.6rem;color:hsl(38,92%,50%)">(已更新)</span>` : "";
+        html += `<div><span style="color:hsl(48,96%,53%)">●</span> ${escapeHtml(decision.routes.secondary.name)}${changeNote}</div>`;
+      }
     }
     html += `</div>`;
   }
