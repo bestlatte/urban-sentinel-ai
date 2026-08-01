@@ -273,6 +273,8 @@ async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of
         
         if result and result.replanned:
             # 推播 routes.updated.v1 通知前端
+            # 包含新的報告內容，讓前端能夠同步更新報告卡片
+            new_decision = result.new_decision_result
             await ws_manager.broadcast({
                 "message_type": "routes.updated.v1",
                 "payload": {
@@ -286,6 +288,9 @@ async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of
                     "invalid_reasons": result.invalid_reasons,
                     "replan_count": record.route_replan_count,
                     "time": as_of.isoformat(),
+                    # 新增：更新後的報告內容
+                    "control_center_report": new_decision.control_center_report if new_decision else None,
+                    "notifications": new_decision.notifications.model_dump(mode="json") if new_decision and new_decision.notifications else None,
                 },
             })
             
@@ -563,16 +568,17 @@ async def evaluate_incident(body: dict):
     decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
     payload_json = decision_result.model_dump(mode="json")
 
-    # 廣播 decision.alert.v1（若等級為 A 或 B）
-    if decision_result.level in ("A", "B"):
-        await ws_manager.broadcast({
-            "message_type": "decision.alert.v1",
-            "payload": {
-                "level": decision_result.level,
-                "description": incident.description,
-                "ete_minutes": decision_result.ete.minutes if decision_result.ete else None,
-            },
-        })
+    # 廣播 decision.alert.v1（所有事件注入都發送警報）
+    # severity 用於顯示事件嚴重度，level 用於顯示交通應變等級
+    await ws_manager.broadcast({
+        "message_type": "decision.alert.v1",
+        "payload": {
+            "level": decision_result.level,  # A/B/null（交通等級）
+            "severity": incident.severity,    # Critical/High/Medium（事件嚴重度）
+            "description": incident.description,
+            "ete_minutes": decision_result.ete.minutes if decision_result.ete else None,
+        },
+    })
 
     # 廣播 decision.completed.v1
     await ws_manager.broadcast({

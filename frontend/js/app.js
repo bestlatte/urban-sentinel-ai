@@ -140,8 +140,6 @@ function onDecisionCompleted(decision) {
   renderReportCard(decision);
   // 更新 F7 決策依據
   renderDecisionBasis(decision);
-  // 將事件加入對應等級的框
-  addIncidentToLevelBox(decision);
   // 更新 KPI（事件數）
   const countCard = document.querySelectorAll(".kpi-card")[0];
   if (countCard) {
@@ -290,15 +288,39 @@ function showAlertModal(payload) {
   const stack = document.getElementById("alert-stack");
   if (!stack) return;
   
-  const isA = payload.level === "A";
-  const levelLabel = isA ? "A 級警報" : "B 級警報";
-  const levelClass = isA ? "level-a" : "level-b";
+  // 判斷是「事件注入」還是「模擬器路段預警」
+  const isIncidentAlert = (payload.ete_minutes != null) || payload.severity || !payload.road_name;
+  
+  let levelLabel, levelClass;
+  
+  if (isIncidentAlert && payload.severity) {
+    // 事件注入：顯示事件嚴重度 (Critical/High/Medium)
+    switch (payload.severity) {
+      case "Critical":
+        levelLabel = "Critical 級警報";
+        levelClass = "level-critical";
+        break;
+      case "High":
+        levelLabel = "High 級警報";
+        levelClass = "level-high";
+        break;
+      case "Medium":
+        levelLabel = "Medium 級警報";
+        levelClass = "level-medium";
+        break;
+      default:
+        levelLabel = `${payload.severity} 級警報`;
+        levelClass = "level-b";
+    }
+  } else {
+    // 路段飽和預警：顯示交通等級 (A/B)
+    const isA = payload.level === "A";
+    levelLabel = isA ? "A 級警報" : "B 級警報";
+    levelClass = isA ? "level-a" : "level-b";
+  }
   
   const alertId = `alert-${++alertCounter}`;
   
-  // 判斷是「事件注入」還是「模擬器路段預警」
-  // ete_minutes 為實際數字時是事件注入，null/undefined 且有 road_name 是路段預警
-  const isIncidentAlert = (payload.ete_minutes != null) || !payload.road_name;
   // 只有飽和路段預警才自動消失
   const isSaturationAlert = !isIncidentAlert;
   
@@ -564,8 +586,6 @@ async function resetSystem() {
       document.getElementById("f5-report-content").innerHTML = "";
       document.getElementById("f7-activity-feed").innerHTML = "";
       document.getElementById("f7-basis-detail").innerHTML = "";
-      document.getElementById("incident-list-a").innerHTML = "";
-      document.getElementById("incident-list-b").innerHTML = "";
       
       // 強制清空 Activity 事件列表 DOM
       const activityEventList = document.getElementById("activity-event-list");
@@ -585,10 +605,6 @@ async function resetSystem() {
       // 重設 Activity header
       const activityHeader = document.getElementById("activity-main-header");
       if (activityHeader) activityHeader.textContent = "選擇事件查看詳情";
-      
-      // 更新計數
-      updateIncidentCount("a");
-      updateIncidentCount("b");
       
       console.log("[resetSystem] 系統重設完成，最終 _activityByEvent.size =", _activityByEvent.size);
       alert("系統已重設");
@@ -675,6 +691,11 @@ function _renderReportContent(decision) {
   const container = document.getElementById("f5-report-content");
   if (!container) return;
 
+  // 除錯：確認收到的 decision 內容
+  console.log("[_renderReportContent] decision:", decision);
+  console.log("[_renderReportContent] notifications:", decision.notifications);
+  console.log("[_renderReportContent] control_center_report:", decision.control_center_report);
+
   // 啟用放大按鈕
   const expandBtn = document.getElementById("expand-report-btn");
   if (expandBtn) expandBtn.disabled = false;
@@ -745,18 +766,6 @@ function _renderReportContent(decision) {
       html += `</div>`;
     });
     
-    html += `</div>`;
-  }
-
-  // 多語簡訊
-  if (decision.notifications) {
-    html += `<div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">`;
-    html += `<div style="font-size:0.65rem;color:var(--text-muted);margin-bottom:6px">NOTIFICATIONS</div>`;
-    const n = decision.notifications;
-    if (n.zh) html += `<div style="font-size:0.72rem;margin-bottom:3px;color:var(--text-secondary)"><span style="color:var(--text-muted);font-size:0.6rem;margin-right:6px">ZH</span>${escapeHtml(n.zh)}</div>`;
-    if (n.en) html += `<div style="font-size:0.72rem;margin-bottom:3px;color:var(--text-secondary)"><span style="color:var(--text-muted);font-size:0.6rem;margin-right:6px">EN</span>${escapeHtml(n.en)}</div>`;
-    if (n.ja) html += `<div style="font-size:0.72rem;margin-bottom:3px;color:var(--text-secondary)"><span style="color:var(--text-muted);font-size:0.6rem;margin-right:6px">JA</span>${escapeHtml(n.ja)}</div>`;
-    if (n.ko) html += `<div style="font-size:0.72rem;margin-bottom:3px;color:var(--text-secondary)"><span style="color:var(--text-muted);font-size:0.6rem;margin-right:6px">KO</span>${escapeHtml(n.ko)}</div>`;
     html += `</div>`;
   }
 
@@ -872,19 +881,6 @@ function openReportModal() {
   }
   html += `</div>`;
   html += `</div>`;
-
-  // 多語簡訊
-  if (d.notifications) {
-    html += `<div class="report-section">`;
-    html += `<div class="report-section-label">多語通報簡訊</div>`;
-    html += `<div class="report-notifications">`;
-    const n = d.notifications;
-    if (n.zh) html += `<div class="report-notif-item"><span class="report-notif-lang">ZH</span>${escapeHtml(n.zh)}</div>`;
-    if (n.en) html += `<div class="report-notif-item"><span class="report-notif-lang">EN</span>${escapeHtml(n.en)}</div>`;
-    if (n.ja) html += `<div class="report-notif-item"><span class="report-notif-lang">JA</span>${escapeHtml(n.ja)}</div>`;
-    if (n.ko) html += `<div class="report-notif-item"><span class="report-notif-lang">KO</span>${escapeHtml(n.ko)}</div>`;
-    html += `</div></div>`;
-  }
 
   // 建議書全文
   if (d.control_center_report) {
@@ -1485,6 +1481,16 @@ function onRoutesUpdated(payload) {
         decision.routes.secondary = null;
       }
     }
+  }
+  
+  // ★ 更新報告書與簡訊內容（使用後端重新生成的版本）
+  if (payload.control_center_report !== undefined) {
+    decision.control_center_report = payload.control_center_report;
+    console.log("[路線重規劃] 報告書已更新");
+  }
+  if (payload.notifications !== undefined) {
+    decision.notifications = payload.notifications;
+    console.log("[路線重規劃] 簡訊內容已更新");
   }
   
   // 重新渲染報告（如果當前顯示的是這個事件）

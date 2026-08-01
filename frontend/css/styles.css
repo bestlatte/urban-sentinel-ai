@@ -987,6 +987,22 @@ body {
   border-left: 4px solid hsl(25, 95%, 53%);
 }
 
+/* 事件嚴重度樣式：Critical（紅）、High（橘）、Medium（黃） */
+.alert-item.level-critical {
+  border-left: 4px solid hsl(0, 84%, 50%);
+  background: linear-gradient(135deg, hsla(0, 84%, 50%, 0.15), hsla(0, 0%, 15%, 0.95));
+}
+
+.alert-item.level-high {
+  border-left: 4px solid hsl(25, 95%, 53%);
+  background: linear-gradient(135deg, hsla(25, 95%, 53%, 0.15), hsla(0, 0%, 15%, 0.95));
+}
+
+.alert-item.level-medium {
+  border-left: 4px solid hsl(45, 93%, 47%);
+  background: linear-gradient(135deg, hsla(45, 93%, 47%, 0.15), hsla(0, 0%, 15%, 0.95));
+}
+
 @keyframes alertSlideIn {
   from {
     opacity: 0;
@@ -1018,6 +1034,18 @@ body {
 
 .alert-item.level-b .alert-item-level {
   color: hsl(25, 95%, 53%);
+}
+
+.alert-item.level-critical .alert-item-level {
+  color: hsl(0, 84%, 60%);
+}
+
+.alert-item.level-high .alert-item-level {
+  color: hsl(25, 95%, 53%);
+}
+
+.alert-item.level-medium .alert-item-level {
+  color: hsl(45, 93%, 55%);
 }
 
 .alert-item-time {

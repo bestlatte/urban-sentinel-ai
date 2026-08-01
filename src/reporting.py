@@ -225,18 +225,159 @@ def _generate_c4_fallback(
     ete: EteEstimate,
     multilingual: bool,
 ) -> Notification:
-    """USE_BEDROCK=false 保底模板：固定格式簡訊（含日文/韓文加分項）。"""
-    route_name = route_plan.primary.name if (route_plan and route_plan.primary) else "請依現場指揮"
-    zh = f"交通事故通知：{incident.location}發生{incident.type}，建議改道{route_name}，預計{ete.minutes}分鐘後恢復。"
+    """USE_BEDROCK=false 保底模板：固定格式簡訊（含日文/韓文加分項）。
+    
+    多語版本會將地點、事件類型、改道建議翻譯成對應語言。
+    """
+    route_name_zh = route_plan.primary.name if (route_plan and route_plan.primary) else "請依現場指揮"
+    
+    # 事件類型翻譯對照表
+    type_translations = {
+        "Road_Collapse_Accident": {
+            "zh": "路面塌陷事故",
+            "en": "road collapse",
+            "ja": "路面陥没事故",
+            "ko": "도로 붕괴 사고",
+        },
+        "Traffic_Accident": {
+            "zh": "交通事故",
+            "en": "traffic accident",
+            "ja": "交通事故",
+            "ko": "교통사고",
+        },
+        "Crowd_Surge_Injury": {
+            "zh": "人群推擠傷亡",
+            "en": "crowd surge incident",
+            "ja": "群衆事故",
+            "ko": "군중 밀집 사고",
+        },
+        "Power_Failure": {
+            "zh": "號誌故障",
+            "en": "signal malfunction",
+            "ja": "信号機故障",
+            "ko": "신호등 고장",
+        },
+        "Vehicle_Fire": {
+            "zh": "車輛起火",
+            "en": "vehicle fire",
+            "ja": "車両火災",
+            "ko": "차량 화재",
+        },
+        "Large_Event_Dispersal": {
+            "zh": "大型活動散場",
+            "en": "large event dispersal",
+            "ja": "大型イベント終了",
+            "ko": "대형 행사 산개",
+        },
+    }
+    
+    # 常見地點翻譯對照表
+    location_translations = {
+        "捷運國父紀念館站": {
+            "en": "Sun Yat-sen Memorial Hall MRT Station",
+            "ja": "MRT国父記念館駅",
+            "ko": "국부기념관역",
+        },
+        "捷運市政府站": {
+            "en": "Taipei City Hall MRT Station",
+            "ja": "MRT市政府駅",
+            "ko": "시청역",
+        },
+        "台北101": {
+            "en": "Taipei 101",
+            "ja": "台北101",
+            "ko": "타이베이 101",
+        },
+        "大巨蛋": {
+            "en": "Taipei Dome",
+            "ja": "台北ドーム",
+            "ko": "타이베이 돔",
+        },
+        "信義威秀": {
+            "en": "Shin Kong Mitsukoshi Xinyi",
+            "ja": "信義エリア",
+            "ko": "신의 지구",
+        },
+        "光復南路": {
+            "en": "Guangfu South Road",
+            "ja": "光復南路",
+            "ko": "광푸남로",
+        },
+        "忠孝東路": {
+            "en": "Zhongxiao East Road",
+            "ja": "忠孝東路",
+            "ko": "중샤오동로",
+        },
+        "市民大道": {
+            "en": "Civic Boulevard",
+            "ja": "市民大道",
+            "ko": "시민대로",
+        },
+        "基隆路": {
+            "en": "Keelung Road",
+            "ja": "基隆路",
+            "ko": "지룽로",
+        },
+        "松高路": {
+            "en": "Songgao Road",
+            "ja": "松高路",
+            "ko": "송가오로",
+        },
+    }
+    
+    # 無替代路線時的翻譯
+    no_route_translations = {
+        "zh": "請依現場指揮",
+        "en": "follow on-site instructions",
+        "ja": "現場の指示に従ってください",
+        "ko": "현장 지시에 따르세요",
+    }
+    
+    def translate_location(loc: str, lang: str) -> str:
+        """嘗試翻譯地點名稱，找不到則保留原文。"""
+        if lang == "zh":
+            return loc
+        for zh_key, trans in location_translations.items():
+            if zh_key in loc:
+                return loc.replace(zh_key, trans.get(lang, zh_key))
+        return loc  # 找不到翻譯，保留原文
+    
+    def get_type_text(t: str, lang: str) -> str:
+        """取得事件類型的翻譯文字。"""
+        if t in type_translations:
+            return type_translations[t].get(lang, t)
+        return t
+    
+    def get_route_name(lang: str) -> str:
+        """取得改道建議的翻譯文字。"""
+        if route_plan and route_plan.primary:
+            return translate_location(route_plan.primary.name, lang)
+        return no_route_translations.get(lang, "請依現場指揮")
+    
+    # 中文版（必填）
+    type_zh = get_type_text(incident.type, "zh")
+    zh = f"交通事故通知：{incident.location}發生{type_zh}，建議改道{route_name_zh}，預計{ete.minutes}分鐘後恢復。"
 
     en: str | None = None
     ja: str | None = None
     ko: str | None = None
 
     if multilingual:
-        en = f"Traffic alert: incident at {incident.location}, suggested detour via {route_name}, ETA {ete.minutes} min."
-        ja = f"交通警報：{incident.location}で事故発生。迂回路：{route_name}、復旧予定：{ete.minutes}分後。"
-        ko = f"교통 알림: {incident.location}에서 사고 발생. 우회 경로: {route_name}, 예상 복구: {ete.minutes}분 후."
+        loc_en = translate_location(incident.location, "en")
+        loc_ja = translate_location(incident.location, "ja")
+        loc_ko = translate_location(incident.location, "ko")
+        
+        type_en = get_type_text(incident.type, "en")
+        type_ja = get_type_text(incident.type, "ja")
+        type_ko = get_type_text(incident.type, "ko")
+        
+        route_en = get_route_name("en")
+        route_ja = get_route_name("ja")
+        route_ko = get_route_name("ko")
+        
+        en = f"Traffic alert: {type_en} at {loc_en}. Suggested detour via {route_en}. ETA {ete.minutes} min."
+        ja = f"交通警報：{loc_ja}で{type_ja}発生。迂回路：{route_ja}、復旧予定：{ete.minutes}分後。"
+        ko = f"교통 알림: {loc_ko}에서 {type_ko} 발생. 우회 경로: {route_ko}, 예상 복구: {ete.minutes}분 후."
 
     return Notification(zh=zh, en=en, ja=ja, ko=ko)
 
@@ -258,6 +399,9 @@ def generate_report(
     `routing.count_affected_intersections()` 算受影響路口數，見 `_generate_c1_c3_fallback`。
     """
     import os
+    import logging
+
+    logger = logging.getLogger(__name__)
 
     use_bedrock = os.getenv("USE_BEDROCK", "true").lower() == "true"
     multilingual = sensing.multilingual_required
@@ -267,20 +411,34 @@ def generate_report(
     try:
         if use_bedrock:
             report_text = _generate_with_llm(incident, sensing, route_plan, ete, bundle)
-        else:
-            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Bedrock LLM 報告生成失敗，降級為保底模板: {e}")
         report_text = None
+
+    # Bedrock 失敗或 USE_BEDROCK=false 時使用保底模板
+    if report_text is None:
+        try:
+            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle)
+        except Exception as e:
+            logger.error(f"保底模板生成也失敗: {e}")
+            report_text = None
 
     # C4 簡訊
     notification: Notification | None = None
     try:
         if use_bedrock:
             notification = _generate_notification_with_llm(incident, route_plan, ete, multilingual)
-        else:
-            notification = _generate_c4_fallback(incident, route_plan, ete, multilingual)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Bedrock LLM 簡訊生成失敗，降級為保底模板: {e}")
         notification = None
+
+    # Bedrock 失敗或 USE_BEDROCK=false 時使用保底模板
+    if notification is None:
+        try:
+            notification = _generate_c4_fallback(incident, route_plan, ete, multilingual)
+        except Exception as e:
+            logger.error(f"保底簡訊生成也失敗: {e}")
+            notification = None
 
     return report_text, notification
 

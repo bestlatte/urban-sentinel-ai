@@ -384,6 +384,8 @@ class IncidentRecord:
     """七階段跑完（PUSH）後才有值；PLAN/EXECUTE 中間階段為 None。"""
     bundle_snapshot: NormalizedDataBundle | None = None
     """OPEN 當下的 as-of bundle 快照，供 What-if 分支重算時取用（見 simulate_scenario）。"""
+    sensing_result: SensingResult | None = None
+    """初次評估時的規則命中結果，供路線重規劃時重新生成報告書使用。"""
     route_replan_count: int = 0
     """該事件的路線重規劃次數。"""
     last_route_check_at: datetime | None = None
@@ -535,12 +537,19 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         trace_id=trace_id,
         incident=event,
         bundle_snapshot=bundle,
+        sensing_result=None,  # 稍後由 evaluate_rules 填入
     )
 
     # --- 2. FLAGS ---
     sensing = GATEWAY.evaluate_rules(bundle, event)
     if sensing.multilingual_required:
         _STATE.multilingual = True
+    
+    # 保存 sensing_result 供路線重規劃時重新生成報告書使用
+    record = _STATE.active_incidents.get(event.event_id)
+    if record:
+        record.sensing_result = sensing
+    
     try:
         record_step(trace_id, "A2", "SET_FLAG", {"multilingual": _STATE.multilingual}, {})
     except Exception as e:
@@ -854,8 +863,33 @@ def check_and_replan_routes(
         RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
     )
 
-    # 更新 decision_result 的 routes
+    # 更新 decision_result 的 routes 以及重新生成報告書與簡訊
     old_decision = record.decision_result
+    
+    # 重新生成報告書與簡訊（路線改了，報告內容也要同步更新）
+    # 需要 sensing 資訊，從原 decision 取用（sensing 在初次評估時已存入 record）
+    new_report = old_decision.control_center_report
+    new_notification = old_decision.notifications
+    degraded = list(old_decision.degraded)
+    
+    if record.sensing_result is not None:
+        try:
+            new_report, new_notification = GATEWAY.generate_report(
+                incident=record.incident,
+                sensing=record.sensing_result,
+                route_plan=new_route_plan,
+                ete=old_decision.ete,
+                advisory=None,  # 重規劃時不重新呼叫 RAG，用原有的 SOP 命中
+                bundle=bundle,
+            )
+            logger.info(f"[路線監測] {event_id} 報告書與簡訊已重新生成")
+        except Exception as e:
+            logger.warning(f"[路線監測] {event_id} 報告書重新生成失敗: {e}，保留原報告")
+            if "C1_FAILED" not in degraded:
+                degraded.append("C1_REPLAN_FAILED")
+    else:
+        logger.warning(f"[路線監測] {event_id} 缺少 sensing_result，無法重新生成報告書")
+    
     new_decision = DecisionResult(
         trace_id=old_decision.trace_id,
         triggered_by=old_decision.triggered_by,
@@ -863,9 +897,9 @@ def check_and_replan_routes(
         incident=old_decision.incident,
         routes=new_route_plan,
         ete=old_decision.ete,
-        control_center_report=old_decision.control_center_report,
-        notifications=old_decision.notifications,
-        degraded=old_decision.degraded,
+        control_center_report=new_report,
+        notifications=new_notification,
+        degraded=degraded,
         duration_ms=old_decision.duration_ms,
         is_simulated=old_decision.is_simulated,
     )
