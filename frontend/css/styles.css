@@ -2438,6 +2438,10 @@ body.right-side-nav-collapsed .page-content {
 }
 
 .sim-floating-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
 /* ========== Incident Monitor Page ========== */
 .incidents-page-layout {
