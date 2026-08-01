@@ -7,6 +7,16 @@
 let mapGeometry = null;
 let mapTopology = null;
 
+/**
+ * 清空地圖路線（重設系統時呼叫）
+ */
+function clearMapRoutes() {
+  const container = document.getElementById("f4-map");
+  if (container) {
+    renderMap(container, null, null);
+  }
+}
+
 async function initMap() {
   const container = document.getElementById("f4-map");
   if (!container) return;
