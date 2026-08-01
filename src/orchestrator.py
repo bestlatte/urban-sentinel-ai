@@ -60,6 +60,7 @@ class ModuleGateway(Protocol):
     # SOP-5（號誌故障）需要用路網拓樸算受影響路口數（`routing.count_affected_intersections()`），
     # 警力人數=路口數×2，這個計算需要 bundle 才能做，之前完全沒傳進來，是 §5 這條 SOP 的
     # 人力派遣建議一直缺少具體人數的原因。
+    # [2026-08-01新增] `merged_incident_info` 參數：同路段多事件合併報告書所需資訊。
     def generate_report(
         self,
         incident: Incident,
@@ -68,6 +69,7 @@ class ModuleGateway(Protocol):
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]: ...
 
     def run_agent(
@@ -191,6 +193,7 @@ class StubGateway:
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]:
         report = (
             f"【交控建議書】事件 {incident.event_id}\n"
@@ -244,9 +247,10 @@ class LiveGateway:
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]:
         from src.reporting import generate_report
-        return generate_report(incident, sensing, route_plan, ete, advisory, bundle)
+        return generate_report(incident, sensing, route_plan, ete, advisory, bundle, merged_incident_info)
 
     def run_agent(
         self,
@@ -384,6 +388,8 @@ class IncidentRecord:
     """七階段跑完（PUSH）後才有值；PLAN/EXECUTE 中間階段為 None。"""
     bundle_snapshot: NormalizedDataBundle | None = None
     """OPEN 當下的 as-of bundle 快照，供 What-if 分支重算時取用（見 simulate_scenario）。"""
+    sensing_result: SensingResult | None = None
+    """初次評估時的規則命中結果，供路線重規劃時重新生成報告書使用。"""
     route_replan_count: int = 0
     """該事件的路線重規劃次數。"""
     last_route_check_at: datetime | None = None
@@ -397,9 +403,90 @@ class GlobalState:
     """key=event_id。寫入：週期 PUSH 階段；移除：收到恢復訊號（Partial_Open等）。"""
     cycle_counter: int = 0
     """trace_id 流水號（行程內）。"""
+    resolved_incidents: dict[str, IncidentRecord] = field(default_factory=dict)
+    """已解除事件的歷史紀錄，供 Dashboard 顯示。"""
 
 
 _STATE = GlobalState()
+
+
+# ---------------------------------------------------------------------------
+# 情境1：同路段多事件合併 ETE 計算
+# ---------------------------------------------------------------------------
+
+_MULTI_INCIDENT_DELAY_MINUTES = 15
+"""每多一個同路段事件，增加的協調延遲（分鐘）。"""
+
+
+def get_same_segment_incidents(segment_id: str, exclude_event_id: str | None = None) -> list[IncidentRecord]:
+    """取得同一路段的所有活躍事件。"""
+    result = []
+    for event_id, record in _STATE.active_incidents.items():
+        if exclude_event_id and event_id == exclude_event_id:
+            continue
+        affected = record.incident.affected_road or record.incident.affected_segment
+        if affected == segment_id:
+            result.append(record)
+    return result
+
+
+def calculate_merged_ete(base_ete_minutes: int, same_segment_count: int) -> int:
+    """情境1：合併 ETE 計算。
+    
+    公式：合併 ETE = max(各事件ETE) + (事件數量 - 1) × 15分鐘
+    
+    Args:
+        base_ete_minutes: 基礎 ETE（最大值）
+        same_segment_count: 同路段事件總數（含自己）
+    
+    Returns:
+        合併後的 ETE 分鐘數
+    """
+    if same_segment_count <= 1:
+        return base_ete_minutes
+    
+    delay = (same_segment_count - 1) * _MULTI_INCIDENT_DELAY_MINUTES
+    return base_ete_minutes + delay
+
+
+def get_merged_incident_info(segment_id: str) -> dict | None:
+    """取得同路段事件的合併資訊。
+    
+    Returns:
+        {
+            "event_ids": [...],
+            "count": int,
+            "max_ete_minutes": int,
+            "merged_ete_minutes": int,
+            "descriptions": [...],
+        }
+        如果該路段只有一個事件或沒有事件，回傳 None。
+    """
+    incidents = get_same_segment_incidents(segment_id)
+    if len(incidents) <= 1:
+        return None
+    
+    event_ids = []
+    descriptions = []
+    max_ete = 0
+    
+    for record in incidents:
+        event_ids.append(record.incident.event_id)
+        descriptions.append(record.incident.description)
+        if record.decision_result and record.decision_result.ete:
+            ete = record.decision_result.ete.minutes
+            if ete > max_ete:
+                max_ete = ete
+    
+    merged_ete = calculate_merged_ete(max_ete, len(incidents))
+    
+    return {
+        "event_ids": event_ids,
+        "count": len(incidents),
+        "max_ete_minutes": max_ete,
+        "merged_ete_minutes": merged_ete,
+        "descriptions": descriptions,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -535,12 +622,19 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         trace_id=trace_id,
         incident=event,
         bundle_snapshot=bundle,
+        sensing_result=None,  # 稍後由 evaluate_rules 填入
     )
 
     # --- 2. FLAGS ---
     sensing = GATEWAY.evaluate_rules(bundle, event)
     if sensing.multilingual_required:
         _STATE.multilingual = True
+    
+    # 保存 sensing_result 供路線重規劃時重新生成報告書使用
+    record = _STATE.active_incidents.get(event.event_id)
+    if record:
+        record.sensing_result = sensing
+    
     try:
         record_step(trace_id, "A2", "SET_FLAG", {"multilingual": _STATE.multilingual}, {})
     except Exception as e:
@@ -626,6 +720,44 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         _dispatch_seq += 1
         await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_done")
 
+    # ★ 情境1：同路段多事件合併 ETE
+    affected_seg = event.affected_road or event.affected_segment
+    same_segment_incidents = get_same_segment_incidents(affected_seg, exclude_event_id=event.event_id)
+    merged_incident_info = None
+    
+    if same_segment_incidents and ete is not None:
+        # 有其他同路段事件，需要計算合併 ETE
+        # 找出所有同路段事件中最大的 ETE
+        all_etes = [ete.minutes]
+        for other_record in same_segment_incidents:
+            if other_record.decision_result and other_record.decision_result.ete:
+                all_etes.append(other_record.decision_result.ete.minutes)
+        
+        max_ete = max(all_etes)
+        total_count = len(same_segment_incidents) + 1  # 包含自己
+        merged_ete = calculate_merged_ete(max_ete, total_count)
+        
+        logger.info(f"[同路段事件合併] {event.event_id} 與 {len(same_segment_incidents)} 個事件同路段，"
+                    f"原始 ETE={ete.minutes}，最大 ETE={max_ete}，合併後={merged_ete} 分鐘")
+        
+        # 更新 ETE
+        ete = EteEstimate(
+            minutes=merged_ete,
+            recovery_at=ete.recovery_at,  # 暫時保持原值，之後可以重算
+            formula=f"{ete.formula} → 合併計算: max({max_ete}) + ({total_count}-1)×15 = {merged_ete}",
+            base_clearance=ete.base_clearance,
+            average_saturation=ete.average_saturation,
+        )
+        
+        # 記錄合併資訊
+        merged_incident_info = {
+            "event_ids": [event.event_id] + [r.incident.event_id for r in same_segment_incidents],
+            "count": total_count,
+            "max_ete_minutes": max_ete,
+            "merged_ete_minutes": merged_ete,
+            "descriptions": [event.description] + [r.incident.description for r in same_segment_incidents],
+        }
+
     # Agent 建議
     advisory: BedrockAdvisory | None = None
     try:
@@ -638,7 +770,7 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         _dispatch_seq += 1
         await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "report_started")
         try:
-            report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory, bundle)
+            report_text, notification = GATEWAY.generate_report(event, sensing, route_plan, ete, advisory, bundle, merged_incident_info)
         except Exception as e:
             logger.warning(f"generate_report 失敗: {e}")
         if report_text is None:
@@ -684,6 +816,7 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         degraded=degraded,
         duration_ms=elapsed,
         is_simulated=is_simulated,
+        merged_incident_info=merged_incident_info,
     )
 
     # 更新 GlobalState
@@ -854,8 +987,33 @@ def check_and_replan_routes(
         RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
     )
 
-    # 更新 decision_result 的 routes
+    # 更新 decision_result 的 routes 以及重新生成報告書與簡訊
     old_decision = record.decision_result
+    
+    # 重新生成報告書與簡訊（路線改了，報告內容也要同步更新）
+    # 需要 sensing 資訊，從原 decision 取用（sensing 在初次評估時已存入 record）
+    new_report = old_decision.control_center_report
+    new_notification = old_decision.notifications
+    degraded = list(old_decision.degraded)
+    
+    if record.sensing_result is not None:
+        try:
+            new_report, new_notification = GATEWAY.generate_report(
+                incident=record.incident,
+                sensing=record.sensing_result,
+                route_plan=new_route_plan,
+                ete=old_decision.ete,
+                advisory=None,  # 重規劃時不重新呼叫 RAG，用原有的 SOP 命中
+                bundle=bundle,
+            )
+            logger.info(f"[路線監測] {event_id} 報告書與簡訊已重新生成")
+        except Exception as e:
+            logger.warning(f"[路線監測] {event_id} 報告書重新生成失敗: {e}，保留原報告")
+            if "C1_FAILED" not in degraded:
+                degraded.append("C1_REPLAN_FAILED")
+    else:
+        logger.warning(f"[路線監測] {event_id} 缺少 sensing_result，無法重新生成報告書")
+    
     new_decision = DecisionResult(
         trace_id=old_decision.trace_id,
         triggered_by=old_decision.triggered_by,
@@ -863,9 +1021,9 @@ def check_and_replan_routes(
         incident=old_decision.incident,
         routes=new_route_plan,
         ete=old_decision.ete,
-        control_center_report=old_decision.control_center_report,
-        notifications=old_decision.notifications,
-        degraded=old_decision.degraded,
+        control_center_report=new_report,
+        notifications=new_notification,
+        degraded=degraded,
         duration_ms=old_decision.duration_ms,
         is_simulated=old_decision.is_simulated,
     )

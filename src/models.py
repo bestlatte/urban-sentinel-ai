@@ -412,6 +412,18 @@ class DecisionResult(BaseModel):
     duration_ms: int
     is_simulated: bool
     """依本次決策實際引用的資料來源計算，不得寫死 True（引用真實 provided 資料時應為 False）。"""
+    
+    # [2026-08-01新增] 同路段多事件合併資訊
+    merged_incident_info: dict | None = None
+    """同路段有多個事件時，包含合併事件的詳細資訊：
+    {
+        "event_ids": [...],
+        "count": int,
+        "max_ete_minutes": int,
+        "merged_ete_minutes": int,
+        "descriptions": [...],
+    }
+    """
 
 
 class KpiSummary(BaseModel):

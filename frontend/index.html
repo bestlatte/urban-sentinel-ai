@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/frontend/css/chat-variables.css" />
-  <link rel="stylesheet" href="/frontend/css/styles.css" />
+  <link rel="stylesheet" href="/frontend/css/styles.css?v=left-padding-30-alert-bottom-13" />
   <link rel="stylesheet" href="/frontend/css/chat-panel.css" />
   <link rel="stylesheet" href="/frontend/css/chat-messages.css" />
   <link rel="stylesheet" href="/frontend/css/chat-cards.css" />
@@ -37,10 +37,9 @@
     </div>
   </header>
 
-  <!-- Side Navigation -->
-  <aside class="side-nav-shell" aria-label="主要頁面導覽">
-    <button class="side-nav-toggle" type="button" onclick="toggleSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
-      <span>‹</span>
+  <aside class="right-side-nav" aria-label="主要頁面導覽">
+    <button class="right-side-nav-toggle" type="button" onclick="toggleRightSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
+      <span>›</span>
     </button>
     <div class="side-nav-title">Workspace</div>
     <nav class="page-nav" id="page-nav">
@@ -55,6 +54,10 @@
       <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')" title="Activity Log">
         <span class="page-nav-icon">📋</span>
         <span class="page-nav-label">Activity Log</span>
+      </button>
+      <button class="page-nav-btn" data-page="reports" onclick="switchPage('reports')" title="Reports">
+        <span class="page-nav-icon">📄</span>
+        <span class="page-nav-label">Reports</span>
       </button>
     </nav>
     <div class="side-nav-footer">
@@ -72,10 +75,8 @@
         <!-- KPI Row -->
         <section class="section" id="f1-kpi">
           <div class="kpi-card" data-kpi="active_incident_count"></div>
+          <div class="kpi-card" data-kpi="latest_injected_event"></div>
           <div class="kpi-card" data-kpi="current_level"></div>
-          <div class="kpi-card" data-kpi="average_saturation"></div>
-          <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
-          <div class="kpi-card" data-kpi="system_mode"></div>
         </section>
 
         <!-- Chart -->
@@ -148,39 +149,6 @@
           </div>
         </section>
 
-        <!-- Active Incidents by Level -->
-        <section class="section card" id="f2-incidents-panel">
-          <div class="section-header">Active Incidents</div>
-          <div class="incidents-grid">
-            <div class="incident-box level-a collapsed" id="incident-box-a">
-              <div class="incident-box-header" onclick="toggleIncidentBox('a')">
-                <span class="incident-box-title">A 級事件</span>
-                <span class="incident-box-count" id="incident-count-a">(0)</span>
-                <span class="incident-box-toggle">▼</span>
-              </div>
-              <div class="incident-box-preview" id="incident-preview-a">無事件</div>
-              <div class="incident-box-list" id="incident-list-a"></div>
-            </div>
-            <div class="incident-box level-b collapsed" id="incident-box-b">
-              <div class="incident-box-header" onclick="toggleIncidentBox('b')">
-                <span class="incident-box-title">B 級事件</span>
-                <span class="incident-box-count" id="incident-count-b">(0)</span>
-                <span class="incident-box-toggle">▼</span>
-              </div>
-              <div class="incident-box-preview" id="incident-preview-b">無事件</div>
-              <div class="incident-box-list" id="incident-list-b"></div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Saturated Segments (飽和路段即時列表) -->
-        <section class="section card" id="dashboard-saturation-panel">
-          <div class="section-header">Saturated Segments</div>
-          <div class="dashboard-saturation-list" id="dashboard-saturation-list">
-            <div class="saturation-empty">目前無飽和路段</div>
-          </div>
-        </section>
-
         <!-- Advisory Report (擴大區域，原本 F7 的空間也給它) -->
         <section class="section card report-expanded" id="f5-report">
           <div class="section-header section-header-with-btn">
@@ -216,6 +184,29 @@
           <div class="saturation-empty">目前無飽和路段</div>
         </div>
       </aside>
+    </div>
+  </div>
+
+  <!-- Page: Reports (事件報告全覽) -->
+  <div class="page-content" id="page-reports" hidden>
+    <div class="reports-page-layout">
+      <!-- 左側：事件列表 -->
+      <aside class="reports-sidebar">
+        <div class="reports-sidebar-header">事件報告列表</div>
+        <div class="reports-event-list" id="reports-event-list">
+          <div class="reports-empty">尚無事件報告</div>
+        </div>
+      </aside>
+      <!-- 右側：報告詳情 -->
+      <main class="reports-main">
+        <div class="reports-main-header" id="reports-main-header">選擇事件查看報告</div>
+        <div class="reports-detail-content" id="reports-detail-content">
+          <div class="reports-placeholder">
+            <div class="reports-placeholder-icon">📄</div>
+            <div class="reports-placeholder-text">從左側選擇事件以查看完整報告</div>
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 
@@ -276,10 +267,10 @@
   <script src="/frontend/js/api.js"></script>
   <script src="/frontend/js/ws.js"></script>
   <script src="/frontend/vendor/chart.umd.js"></script>
-  <script src="/frontend/js/charts.js?v=traffic-event-bars-2"></script>
+  <script src="/frontend/js/charts.js?v=chart-axis-visible-5"></script>
   <script src="/frontend/js/map.js"></script>
   <script src="/frontend/js/geomap.js"></script>
   <script src="/frontend/js/chat-app.js"></script>
-  <script src="/frontend/js/app.js?v=traffic-event-bars-2"></script>
+  <script src="/frontend/js/app.js?v=collapsible-right-sidebar-10"></script>
 </body>
 </html>
