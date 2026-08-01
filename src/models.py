@@ -416,6 +416,18 @@ class RoutePlan(BaseModel):
     candidates: list[RouteCandidate]
     """完整候選評估清單（含合格與不合格），DecisionResult.routes.candidates 直接取用。"""
     no_feasible_route: bool = False
+    all_alternatives_saturated: bool = False
+    """主/次線是「不得已保留的飽和路線」，周邊已無未飽和路段可以替補。
+
+    [2026-08-02 新增] `no_feasible_route` 只有在 `primary is None` 時才為 True，
+    而 SOP-2 §2a 要求候選全數飽和時**仍要指派**最不糟的那條（見 routing.py 的
+    `SATURATED_BUT_RETAINED` 分支）。結果是「全市都塞死了」這個狀態在下游看起來
+    跟「找到一條順暢的替代道路」完全一樣——`no_feasible_route=False`、
+    `primary` 有值——指揮台因此沒有任何欄位可以判斷該不該跳嚴重警示。
+
+    這個旗標補的就是那個缺口：**有指派，但沒有可替補的路段**。
+    `no_feasible_route` 維持原語意（連飽和候選都湊不出來），兩者不互斥。
+    """
     duration_ms: int = 0
     within_60_second_sla: bool = True
 

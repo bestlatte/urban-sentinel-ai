@@ -43,3 +43,92 @@
   text-align: right;
   color: var(--text-muted);
 }
+
+/* ---------------------------------------------------------------------------
+ * [2026-08-02] 對話上下文提示：情況已更新 / 假設已清除 / 此回答已過時
+ *
+ * 三者都刻意做成「橫幅」而不是內文的一句話。它們回答的是「你眼前這段話
+ * 還能不能用」，屬於後設資訊——混進段落裡快速掃視時一定會被跳過，而那正是
+ * 使用者最需要它的時候。
+ * ------------------------------------------------------------------------- */
+
+.msg-notice {
+  font-size: 0.7rem;
+  line-height: 1.5;
+  padding: 6px 9px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+}
+
+.msg-notice-change {
+  background: rgba(245, 158, 11, 0.12);
+  border-left-color: var(--level-b);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.msg-notice-reset {
+  background: var(--bg-elevated);
+  border-left-color: var(--text-muted);
+  color: var(--text-secondary);
+}
+
+/* 過時標記刻意做得很淡：它不該搶走現有內容的注意力，只要在使用者
+ * 回頭讀舊訊息時攔住他就夠了。 */
+.msg-stale {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-bottom: 4px;
+  opacity: 0.85;
+}
+
+/* --- 生效假設 chips --- */
+.chat-assumptions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.chat-assumptions:empty {
+  display: none;
+}
+
+.chat-assumptions-label {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.chat-assumption-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.66rem;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+.chat-assumption-chip button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 50%;
+}
+
+.chat-assumption-chip button:hover {
+  color: var(--level-a);
+  background: rgba(0, 0, 0, 0.06);
+}

@@ -551,6 +551,14 @@ class IncidentRecord:
     """該事件的路線重規劃次數。"""
     last_route_check_at: datetime | None = None
     """上次檢查路線有效性的時間。"""
+    last_route_state_signature: str | None = None
+    """上次已推播出去的路線狀態指紋（主線/次線/失效原因/有無可替補）。
+
+    [2026-08-02] 路線監測從「等級變化才觸發」改成「每個模擬分鐘都檢查」之後，
+    路線一旦飽和就會**每分鐘**都判定 needs_replan，若不比對就會每分鐘重跑一次
+    建議書生成（LLM，約 20 秒）並重推一次警示。這個指紋讓「狀況沒變」的檢查
+    在算完路線（毫秒級）後就停住，不會走到昂貴的那一步。
+    """
 
 
 @dataclass
@@ -1497,6 +1505,19 @@ class RouteMonitorResult:
     """失效原因，key=segment_id。"""
     new_decision_result: DecisionResult | None = None
     """重規劃後的新 DecisionResult。"""
+    route_changed: bool = False
+    """主線或次線真的換人了。
+
+    [2026-08-02] `replanned` 一直被當成「路線換了」在用，但它其實只代表
+    「有跑過一次重規劃並更新了 decision_result」。候選全數飽和時重規劃會
+    再選出同一條路，於是前端畫出「✗ 原路線: 市民大道四段 ／ ✓ 新路線:
+    市民大道四段」——同一條路同時是被淘汰的與新採用的。兩個語意必須分開。
+    """
+    no_alternative_available: bool = False
+    """已無可替補的路段：新方案不是 `no_feasible_route` 就是全數飽和的權宜指派。
+
+    前端據此跳「⚠️ 無可用替代路線」嚴重警示，而不是「🔄 路線更新」。
+    """
 
 
 @dataclass
@@ -1514,13 +1535,110 @@ class ResolveResult:
     """每個受影響事件的重規劃結果。"""
 
 
+def _route_state_signature(plan: RoutePlan) -> str:
+    """路線狀態指紋：新方案本身長什麼樣（主/次線是誰、多塞、有沒有路可替補）。
+
+    刻意描述**結果**而不是觸發原因。用觸發原因（`invalid_reasons`）會多推一則：
+    22:30 那次的失效原因是針對**舊**路線算的（仁愛路四段飽和），下一分鐘
+    重新檢查時原因變成針對**新**路線（市民大道四段 0.95、仁愛路四段 0.85），
+    指紋因此不同 → 同一件事被通報兩次。改看結果就自然收斂。
+
+    也刻意**不含**時間戳——同樣的路網狀況連續成立十分鐘只該通報一次；
+    飽和度真的變了（0.85 → 0.92）指紋才會變，指揮官仍會收到更新過的建議書。
+    """
+    def part(c) -> str:
+        return f"{c.segment_id}@{c.saturation_score}" if c else "-"
+
+    flags = f"{int(plan.no_feasible_route)}{int(plan.all_alternatives_saturated)}"
+    return f"{part(plan.primary)}|{part(plan.secondary)}|{flags}"
+
+
+def _reproject_risks(
+    record: IncidentRecord,
+    route_plan: RoutePlan,
+    bundle: NormalizedDataBundle,
+    old_decision: DecisionResult,
+) -> dict | None:
+    """重規劃後重算二階效應推演。
+
+    [2026-08-02] 兩個重規劃函式原本都用 `DecisionResult(...)` 重建結果，
+    卻沒有帶 `projected_risks` / `merged_incident_info`——這兩個欄位有預設值，
+    所以不會報錯，只會**在重規劃後靜靜消失**：指揮台上原本畫得出來的風險時間軸，
+    路線一更新就整塊不見了。
+
+    推演是純確定性函式，路線換了本來就該重算；算不出來時退回舊值，
+    不能因為少一塊內容就把整次重規劃搞砸。
+    """
+    if old_decision.ete is None or record.sensing_result is None:
+        return old_decision.projected_risks
+    try:
+        from src.risk_projection import project_risks, projection_to_dict
+
+        return projection_to_dict(
+            project_risks(
+                record.incident,
+                route_plan,
+                record.sensing_result,
+                bundle,
+                old_decision.ete.minutes,
+            )
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[路線監測] 風險推演重算失敗，沿用原推演: {e}")
+        return old_decision.projected_risks
+
+
+def current_closed_segments() -> set[str]:
+    """目前所有被事件封閉的路段（來自 active_incidents）。
+
+    抽成函式是為了讓「哪些路不能走」只有一個定義。`check_and_replan_routes()`
+    與 `route_replan_needed()` 必須用完全相同的集合，否則會出現
+    「預判不需要重規劃、真的跑一次卻換了路」這種對不起來的結果。
+    """
+    closed: set[str] = set()
+    for r in _STATE.active_incidents.values():
+        inc = r.incident
+        if inc.status in ("Closed", "Blocked"):
+            if inc.affected_segment:
+                closed.add(inc.affected_segment)
+            if inc.affected_road:
+                closed.add(inc.affected_road)
+    return closed
+
+
+def route_replan_needed(event_id: str, as_of: datetime, bundle=None) -> bool:
+    """這個事件的推薦路線現在還有效嗎？純查表，毫秒級，不碰 LLM。
+
+    [2026-08-02] 給呼叫端一個「先問再做」的入口。`check_and_replan_routes()`
+    內含建議書重新生成（LLM，實測約 20 秒），呼叫端在模擬迴圈裡 await 它時
+    模擬時鐘會整個停住——使用者回報的「時間會當一下」就是這個。
+    有了這個預判，呼叫端可以在真的要花那 20 秒之前先推播進度，把「當機」
+    變成一條有預估時間的進度條。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return False
+    old_routes = record.decision_result.routes
+    if old_routes is None:
+        return False
+
+    from src.routing import check_route_validity
+
+    if bundle is None:
+        bundle = GATEWAY.load_data()
+    return check_route_validity(
+        old_routes, bundle, as_of, current_closed_segments()
+    ).needs_replan
+
+
 def check_and_replan_routes(
     event_id: str,
     as_of: datetime,
 ) -> RouteMonitorResult | None:
     """檢查指定事件的推薦路線是否仍有效，失效則重新規劃。
 
-    此函式由背景監測迴圈呼叫，純確定性邏輯（只呼叫 routing/rules，不呼叫 LLM）。
+    此函式由背景監測迴圈呼叫。路線計算本身純確定性（只呼叫 routing/rules），
+    但**重規劃成功時會重新生成建議書**，那一步會呼叫 LLM。
     回傳 None 表示該 event_id 不存在於 active_incidents 或尚無 decision_result。
     """
     record = _STATE.active_incidents.get(event_id)
@@ -1535,15 +1653,7 @@ def check_and_replan_routes(
     # 取得當前 bundle（非快照，用即時資料檢查飽和度）
     bundle = GATEWAY.load_data()
 
-    # 收集目前所有封閉路段（來自 active_incidents）
-    closed_segments: set[str] = set()
-    for r in _STATE.active_incidents.values():
-        inc = r.incident
-        if inc.status in ("Closed", "Blocked"):
-            if inc.affected_segment:
-                closed_segments.add(inc.affected_segment)
-            if inc.affected_road:
-                closed_segments.add(inc.affected_road)
+    closed_segments = current_closed_segments()
 
     # 呼叫 routing.check_route_validity
     from src.routing import check_route_validity
@@ -1571,9 +1681,54 @@ def check_and_replan_routes(
         RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
     )
 
+    old_primary_id = old_routes.primary.segment_id if old_routes.primary else None
+    old_secondary_id = old_routes.secondary.segment_id if old_routes.secondary else None
+    new_primary_id = new_route_plan.primary.segment_id if new_route_plan.primary else None
+    new_secondary_id = new_route_plan.secondary.segment_id if new_route_plan.secondary else None
+
+    # 「有沒有換路」與「有沒有路可換」是兩件事，兩件都要往上報。
+    #
+    # [2026-08-02 補漏] 這一段以前不存在：不管重規劃出來是什麼，一律回
+    # `replanned=True`，前端因此把「候選全飽和、只好留在原路」畫成
+    # 「已重新規劃替代路線」，新舊路線欄位還是同一條路。實測時序
+    # （ACC_001，22:45）新舊主線都是 RD_TPE_004。
+    route_changed = (old_primary_id != new_primary_id) or (old_secondary_id != new_secondary_id)
+    no_alternative_available = (
+        new_route_plan.no_feasible_route or new_route_plan.all_alternatives_saturated
+    )
+
+    # 狀況跟上次已通報的完全一樣就到此為止——**在**建議書生成之前。
+    #
+    # [2026-08-02] 監測改成每個模擬分鐘都跑（原本只在路段「等級變化」那一刻跑，
+    # 見 main.py 的說明），路線一旦飽和就會分分鐘判定失效。少了這道比對，
+    # 每分鐘都會重跑一次 LLM 建議書並重推一次警示。
+    signature = _route_state_signature(new_route_plan)
+    if signature == record.last_route_state_signature:
+        logger.debug(f"[路線監測] {event_id} 路網狀況與上次通報相同，略過重複重規劃")
+        return RouteMonitorResult(
+            event_id=event_id,
+            replanned=False,
+            old_primary=old_primary_id,
+            new_primary=new_primary_id,
+            old_secondary=old_secondary_id,
+            new_secondary=new_secondary_id,
+            invalid_reasons=validity.invalid_reasons,
+            route_changed=False,
+            no_alternative_available=no_alternative_available,
+        )
+    record.last_route_state_signature = signature
+
+    if no_alternative_available:
+        logger.warning(
+            f"[路線監測] {event_id} 已無可替補路段"
+            f"（no_feasible_route={new_route_plan.no_feasible_route}、"
+            f"全數飽和={new_route_plan.all_alternatives_saturated}）；"
+            f"主線={new_primary_id}、次線={new_secondary_id} 為權宜指派"
+        )
+
     # 更新 decision_result 的 routes 以及重新生成報告書與簡訊
     old_decision = record.decision_result
-    
+
     # 重新生成報告書與簡訊（路線改了，報告內容也要同步更新）
     # 需要 sensing 資訊，從原 decision 取用（sensing 在初次評估時已存入 record）
     new_report = old_decision.control_center_report
@@ -1610,6 +1765,8 @@ def check_and_replan_routes(
         degraded=degraded,
         duration_ms=old_decision.duration_ms,
         is_simulated=old_decision.is_simulated,
+        projected_risks=_reproject_risks(record, new_route_plan, bundle, old_decision),
+        merged_incident_info=old_decision.merged_incident_info,
     )
     record.decision_result = new_decision
     record.route_replan_count += 1
@@ -1617,12 +1774,14 @@ def check_and_replan_routes(
     return RouteMonitorResult(
         event_id=event_id,
         replanned=True,
-        old_primary=old_routes.primary.segment_id if old_routes.primary else None,
-        new_primary=new_route_plan.primary.segment_id if new_route_plan.primary else None,
-        old_secondary=old_routes.secondary.segment_id if old_routes.secondary else None,
-        new_secondary=new_route_plan.secondary.segment_id if new_route_plan.secondary else None,
+        old_primary=old_primary_id,
+        new_primary=new_primary_id,
+        old_secondary=old_secondary_id,
+        new_secondary=new_secondary_id,
         invalid_reasons=validity.invalid_reasons,
         new_decision_result=new_decision,
+        route_changed=route_changed,
+        no_alternative_available=no_alternative_available,
     )
 
 
@@ -1783,6 +1942,9 @@ def _force_replan_routes(
 
     # 比較是否有變化
     route_changed = (old_primary != new_primary) or (old_secondary != new_secondary)
+    no_alternative_available = (
+        new_route_plan.no_feasible_route or new_route_plan.all_alternatives_saturated
+    )
 
     if not route_changed:
         logger.info(f"[連鎖重規劃] {event_id} 路線未變更（{old_primary} 仍是最佳選擇）")
@@ -1794,6 +1956,8 @@ def _force_replan_routes(
             old_secondary=old_secondary,
             new_secondary=new_secondary,
             invalid_reasons={r: "REPLAN_REQUESTED" for r in reason},
+            route_changed=False,
+            no_alternative_available=no_alternative_available,
         )
 
     logger.info(f"[連鎖重規劃] {event_id} 路線有變化：{old_primary} → {new_primary}")
@@ -1834,9 +1998,13 @@ def _force_replan_routes(
         degraded=degraded,
         duration_ms=old_decision.duration_ms,
         is_simulated=old_decision.is_simulated,
+        projected_risks=_reproject_risks(record, new_route_plan, bundle, old_decision),
+        merged_incident_info=old_decision.merged_incident_info,
     )
     record.decision_result = new_decision
     record.route_replan_count += 1
+    # 讓週期監測知道這個狀態已經通報過，否則解除事件後的下一分鐘會再推一次同樣的東西。
+    record.last_route_state_signature = _route_state_signature(new_route_plan)
 
     return RouteMonitorResult(
         event_id=event_id,
@@ -1847,6 +2015,8 @@ def _force_replan_routes(
         new_secondary=new_secondary,
         invalid_reasons={r: "SEGMENT_FREED" for r in reason},
         new_decision_result=new_decision,
+        route_changed=True,
+        no_alternative_available=no_alternative_available,
     )
 
 

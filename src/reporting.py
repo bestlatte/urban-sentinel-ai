@@ -145,6 +145,26 @@ def build_facts_block(
         )
     if route_plan and route_plan.selection_rule:
         lines.append(f"路線選擇規則: {route_plan.selection_rule}")
+
+    # 「沒有路可以替補」必須進事實區塊，否則 LLM 產的建議書寫不出這件事。
+    #
+    # [2026-08-02 補漏] 保底模板（`_generate_c1_c3_fallback`）早就會在路線名稱後
+    # 加註飽和警語，但 `USE_BEDROCK=true` 走的是 LLM 路徑，而 LLM 只看得到這個
+    # 事實區塊——區塊裡沒有這件事，模型當然不會提。實測時序（ACC_001 22:30 起）
+    # 市民大道四段 0.95、仁愛路四段 0.85 全數飽和，建議書卻跟暢通時一字不差。
+    if route_plan and route_plan.no_feasible_route:
+        lines.append(
+            "⚠️ 路網狀態: 無可行替代路線——所有候選路段皆被排除，"
+            "建議書必須明確告知指揮官需啟動人工指揮或區域封閉"
+        )
+    elif route_plan and route_plan.all_alternatives_saturated:
+        lines.append(
+            "⚠️ 路網狀態: 已無可替補路段——周邊候選路段全數飽和（Saturation ≥ 0.85）。"
+            "上列主/次替代路線是依 SOP-2 §2a 例外指派的權宜路線，本身仍處於飽和狀態，"
+            "不是暢通道路。建議書必須明確標示此點，並同步建議長綠燈時制、"
+            "大眾運輸疏運與人工指揮"
+        )
+
     if route_plan:
         for exc in route_plan.excluded:
             reason_text = _reason_code_to_text(exc.reason_code, exc)
@@ -229,12 +249,30 @@ def _generate_c1_c3_fallback(
         for seg_id in f.segment_ids
     }
 
+    # 「無路可替補」要在最前面自成一段，不能只當路線名稱後面的括號附註。
+    # [2026-08-02] 之前指揮官在建議書上看到的是「建議主要替代路線：市民大道四段
+    # （⚠️ 此路線仍處於飽和狀態…）」——關鍵字是「建議」，警語在括號裡，
+    # 快速掃讀時跟一般改道建議長得一樣。
+    if route_plan and route_plan.no_feasible_route:
+        parts.append("═" * 50)
+        parts.append("【⚠️ 嚴重警告：無可行替代路線】")
+        parts.append("所有候選路段均被排除，目前無路段可供替補。")
+        parts.append("建議處置：立即啟動人工指揮、區域封閉，並全面導向大眾運輸。")
+        parts.append("═" * 50)
+    elif route_plan and route_plan.all_alternatives_saturated:
+        parts.append("═" * 50)
+        parts.append("【⚠️ 嚴重警告：目前無可替補路段】")
+        parts.append("周邊候選路段已全數飽和（Saturation ≥ 0.85），下列路線為依 SOP-2 §2a")
+        parts.append("例外指派的權宜路線，本身仍處於飽和狀態，非暢通道路。")
+        parts.append("建議處置：啟動長綠燈時制、加派人工指揮，並同步宣導改用大眾運輸。")
+        parts.append("═" * 50)
+
     if route_plan and route_plan.primary:
-        primary_note = "（⚠️ 此路線仍處於飽和狀態，為目前唯一可用選項，非暢通路線）" \
+        primary_note = "（⚠️ 此路線仍處於飽和狀態，為目前最不壅塞的權宜選項，非暢通路線）" \
             if route_plan.primary.segment_id in saturated_retained_ids else ""
         parts.append(f"建議主要替代路線：{route_plan.primary.name}{primary_note}")
     if route_plan and route_plan.secondary:
-        secondary_note = "（⚠️ 此路線仍處於飽和狀態，為目前唯一可用選項，非暢通路線）" \
+        secondary_note = "（⚠️ 此路線仍處於飽和狀態，為目前最不壅塞的權宜選項，非暢通路線）" \
             if route_plan.secondary.segment_id in saturated_retained_ids else ""
         parts.append(f"建議次要替代路線：{route_plan.secondary.name}{secondary_note}")
     if route_plan:
@@ -248,8 +286,18 @@ def _generate_c1_c3_fallback(
         parts.append(f"號誌調整：替代路線綠燈時間增加 25%，調整期間 {incident.timestamp.strftime('%H:%M')} 至 {ete.recovery_at.split(' ')[-1]}")
     if saturated_retained_ids and route_plan:
         for f in route_plan.findings:
-            if f.finding_code == "SATURATED_BUT_RETAINED":
-                parts.append(f"  ⚠️ 保留飽和路線特別處置：{f.evidence.get('action', '啟動長綠燈時制')}（飽和度 {f.evidence.get('saturation_score')}）")
+            if f.finding_code != "SATURATED_BUT_RETAINED":
+                continue
+            # 逐段列出飽和度。原本讀單數 key `saturation_score`，但 routing.py
+            # 寫的是複數 dict `saturation_scores`，結果永遠印成「飽和度 None」。
+            scores = f.evidence.get("saturation_scores") or {}
+            score_text = "、".join(f"{sid} {scores[sid]}" for sid in f.segment_ids if sid in scores)
+            if not score_text:
+                score_text = str(f.evidence.get("saturation_score", "未知"))
+            parts.append(
+                f"  ⚠️ 保留飽和路線特別處置：{f.evidence.get('action', '啟動長綠燈時制')}"
+                f"（飽和度 {score_text}）"
+            )
 
     # C3 聯動建議
     sop3_hits = [h for h in sensing.rule_hits if h.clause_id == "SOP-3"]

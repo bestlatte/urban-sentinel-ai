@@ -154,6 +154,139 @@ def _current_incident_record():
     return records[0]
 
 
+def snapshot_of(record) -> dict | None:
+    """把「回答當下的世界」凍結成一份可比對的 dict。
+
+    [2026-08-02] 存這份是為了讓下一輪 diff 得出「情況變了什麼」。欄位只挑
+    **會改變處置決定**的那些——飽和度小數點後的抖動不該讓系統跳出來宣告變化，
+    但主線換人、變成無路可替補、建議書改版一定要講。
+
+    刻意是純量 dict：session 是純記憶體的，若存物件參照，`decision_result`
+    一被替換快照就跟著變，diff 永遠是空的。
+    """
+    if record is None:
+        return None
+    decision = getattr(record, "decision_result", None)
+    if decision is None:
+        return None
+
+    routes = getattr(decision, "routes", None)
+    ete = getattr(decision, "ete", None)
+    incident = getattr(record, "incident", None)
+
+    def _cand(c):
+        if c is None:
+            return None
+        return {
+            "segment_id": c.segment_id,
+            "name": c.name,
+            "saturation_score": c.saturation_score,
+        }
+
+    report = getattr(decision, "control_center_report", None)
+    return {
+        "trace_id": getattr(record, "trace_id", None),
+        "event_id": getattr(incident, "event_id", None),
+        "as_of": incident.timestamp.isoformat() if incident is not None else None,
+        "primary": _cand(getattr(routes, "primary", None)) if routes else None,
+        "secondary": _cand(getattr(routes, "secondary", None)) if routes else None,
+        "no_feasible_route": bool(getattr(routes, "no_feasible_route", False)) if routes else False,
+        "all_alternatives_saturated": (
+            bool(getattr(routes, "all_alternatives_saturated", False)) if routes else False
+        ),
+        "replan_count": getattr(record, "route_replan_count", 0),
+        "ete_minutes": getattr(ete, "minutes", None),
+        "recovery_at": getattr(ete, "recovery_at", None),
+        # 只存長度而不是全文：用來判斷「改版了沒」已經夠，存全文會讓每輪的
+        # session 都拖著一份 500~600 字的副本。
+        "report_len": len(report) if isinstance(report, str) else 0,
+    }
+
+
+def _fmt_route(c) -> str:
+    if not c:
+        return "無"
+    sat = c.get("saturation_score")
+    return f"{c.get('name') or c.get('segment_id')}（飽和度 {sat}）" if sat is not None else (
+        c.get("name") or c.get("segment_id") or "無"
+    )
+
+
+def build_change_block(record, last_snapshot: dict | None) -> str | None:
+    """「自你上一次回答以來，世界變了什麼」。沒有實質變化時回 None。
+
+    [2026-08-02 新增]
+    -----------------
+    使用者的要求：「我的 report 隨著時間更改，我追問 chatbot 情況他應該要可以
+    知道情況改變了給我新的東西。」
+
+    在此之前，模型手上有的是：最新的事實區塊 + 舊回答原文，兩者互相矛盾，
+    而**沒有任何一句話告訴它哪個是現在**。它只能猜，通常猜錯，或者兩個數字
+    都講一次讓使用者更混亂。
+
+    「實質變化」的定義刻意收窄（使用者選的是「只在實質改變時主動說」）：
+    主/次線換人、無路可替補翻轉、重規劃次數增加、ETE 變動、建議書改版。
+    **單純時間前進或飽和度小幅波動不算**——每輪都宣告一次「時間過了 3 分鐘」
+    只會讓真正重要的那次被當成雜訊略過。
+    """
+    if not last_snapshot:
+        return None
+    now_snap = snapshot_of(record)
+    if not now_snap:
+        return None
+
+    # 換了一起事件在看，就不是「同一件事的變化」，diff 沒有意義
+    if now_snap.get("trace_id") != last_snapshot.get("trace_id"):
+        return None
+
+    changes: list[str] = []
+
+    old_primary, new_primary = last_snapshot.get("primary"), now_snap.get("primary")
+    if (old_primary or {}).get("segment_id") != (new_primary or {}).get("segment_id"):
+        changes.append(f"- 主要替代路線：{_fmt_route(old_primary)} → {_fmt_route(new_primary)}")
+
+    old_secondary, new_secondary = last_snapshot.get("secondary"), now_snap.get("secondary")
+    if (old_secondary or {}).get("segment_id") != (new_secondary or {}).get("segment_id"):
+        changes.append(f"- 次要替代路線：{_fmt_route(old_secondary)} → {_fmt_route(new_secondary)}")
+
+    if not last_snapshot.get("all_alternatives_saturated") and now_snap.get("all_alternatives_saturated"):
+        changes.append("- ⚠️ 周邊候選路段已全數飽和，**目前無路段可以替補**；現行主/次線為 SOP-2 §2a 例外的權宜指派")
+    elif last_snapshot.get("all_alternatives_saturated") and not now_snap.get("all_alternatives_saturated"):
+        changes.append("- 已重新找到未飽和的替代路段，脫離「無路可替補」狀態")
+
+    if not last_snapshot.get("no_feasible_route") and now_snap.get("no_feasible_route"):
+        changes.append("- ⚠️ 所有候選路段均被排除，已無可行替代路線")
+
+    old_replans = last_snapshot.get("replan_count") or 0
+    new_replans = now_snap.get("replan_count") or 0
+    if new_replans > old_replans:
+        changes.append(f"- 本事件已再重新規劃 {new_replans - old_replans} 次（累計 {new_replans} 次）")
+
+    old_ete, new_ete = last_snapshot.get("ete_minutes"), now_snap.get("ete_minutes")
+    if old_ete != new_ete and new_ete is not None:
+        changes.append(
+            f"- 預計排除時間：{old_ete} 分 → {new_ete} 分"
+            f"（預計恢復 {now_snap.get('recovery_at')}）"
+        )
+
+    if last_snapshot.get("report_len") != now_snap.get("report_len"):
+        changes.append("- 交控建議書已更新，事實區塊引用的是最新版本")
+
+    if not changes:
+        return None
+
+    lines = ["=== 自你上一次回答以來的變化（由系統計算，必須主動告知使用者）==="]
+    old_as_of, new_as_of = last_snapshot.get("as_of"), now_snap.get("as_of")
+    if old_as_of and new_as_of and old_as_of != new_as_of:
+        lines.append(f"- 評估時刻：{old_as_of[11:16]} → {new_as_of[11:16]}")
+    lines.extend(changes)
+    lines.append(
+        "上一輪的回答依據的是變化前的路況。與本區塊衝突時一律以本區塊為準，"
+        "並且**必須在回覆開頭用一句話主動說明情況已改變**，不可以只是默默換掉數字。"
+    )
+    return "\n".join(lines)
+
+
 def build_cycle_facts_block(record) -> str | None:
     """把當前決策週期的確定性事實組成文字塊（方案A 的核心）。
 
@@ -354,7 +487,11 @@ def build_facts_context(record) -> str | None:
 
 
 
-def _build_prompt(context, facts_block: str | None = None) -> str:
+def _build_prompt(
+    context,
+    facts_block: str | None = None,
+    change_block: str | None = None,
+) -> str:
     """把 W1Context（history + assumptions + new_message）與當前週期事實組成 prompt。"""
     parts = []
 
@@ -370,20 +507,50 @@ def _build_prompt(context, facts_block: str | None = None) -> str:
         )
         parts.append("")
 
+    # 變化區塊放在事實之後、歷史之前：讀到歷史那些舊數字時，模型已經先知道
+    # 「下面這些話是變化前講的」。順序顛倒的話它會先把舊答案當成現況吸收進去。
+    if change_block:
+        parts.append(change_block)
+        parts.append("")
+
     if context.history:
         parts.append("=== 對話歷史 ===")
         for turn in context.history:
             parts.append(f"使用者：{turn.user_message}")
             parts.append(f"顧問：{turn.ai_response}")
+        if change_block:
+            parts.append(
+                "（注意：以上回答是在情況改變**之前**給的，其中的路線與數字可能已經過時，"
+                "以事實區塊與變化區塊為準。）"
+            )
         parts.append("")
 
+    scope = getattr(context, "assumption_scope", "carry")
+    dropped = getattr(context, "dropped_assumptions", None) or {}
+
     if context.accumulated_assumptions:
-        parts.append("=== 目前累積的假設條件 ===")
+        parts.append("=== 目前生效的假設條件 ===")
         for key, value in context.accumulated_assumptions.items():
             parts.append(f"- {key} = {value}")
         parts.append(
             "使用者這次的新問題若延續上述假設，呼叫 simulate_scenario 時必須把"
-            "累積假設一併帶入 assumptions，不能只帶本次新增的那一項。"
+            "這些假設一併帶入 assumptions，不能只帶本次新增的那一項。"
+        )
+        parts.append("")
+
+    # 假設被換掉時一定要講。少了這一段，模型會沿用對話歷史裡那個已經失效的
+    # 假設繼續推論——歷史還在 prompt 裡，它不知道那個前提已經作廢。
+    if scope == "replace" and dropped:
+        parts.append("=== 假設情境已重置 ===")
+        parts.append(
+            "使用者提出的是一個**新的、獨立的**假設情境，以下先前的假設已不再生效，"
+            "不得帶入本次的 simulate_scenario，也不得在推論中沿用："
+        )
+        for key, value in dropped.items():
+            parts.append(f"- （已失效）{key} = {value}")
+        parts.append(
+            "請在回覆中用一句話讓使用者知道先前的假設已被清除，"
+            "若他其實是想疊加，可以請他說明「同時」或「再加上」。"
         )
         parts.append("")
 
@@ -520,7 +687,11 @@ def process_whatif(context, timeout_s: float | None = None) -> W1Response:
     # 回 None，模型手上一個數字都沒有還被要求回答路況問題。
     record = _current_incident_record()
     facts_block = build_facts_context(record)
-    prompt = _build_prompt(context, facts_block)
+    # 「自上次回答以來的變化」。沒有實質變化時回 None，prompt 就不會多這一段
+    # ——使用者選的是「只在實質改變時主動說」，每輪都掛一段變化摘要會讓
+    # 真正重要的那次被當成雜訊。
+    change_block = build_change_block(record, getattr(context, "last_snapshot", None))
+    prompt = _build_prompt(context, facts_block, change_block)
 
     try:
         agent = create_whatif_agent()
@@ -560,7 +731,25 @@ def process_whatif(context, timeout_s: float | None = None) -> W1Response:
     if wants_scenario_report(context.new_message):
         _attach_scenario_report(response, agent.messages, record)
 
+    _attach_session_context(response, context, record, change_block)
     return response
+
+
+def _attach_session_context(response, context, record, change_block: str | None) -> None:
+    """把「這輪依據哪個時刻、哪些假設生效、情況有沒有變」掛回回覆。
+
+    這三件事在此之前全部只存在於後端記憶體：使用者看不到系統拿什麼在算，
+    也看不出眼前這段話是幾點鐘的世界。就地修改，任何失敗都只是少幾個欄位。
+    """
+    try:
+        snap = snapshot_of(record)
+        if snap:
+            response.context_as_of = snap.get("as_of")
+        response.active_assumptions = dict(getattr(context, "accumulated_assumptions", None) or {})
+        response.dropped_assumptions = dict(getattr(context, "dropped_assumptions", None) or {})
+        response.situation_changed = bool(change_block)
+    except Exception:  # noqa: BLE001
+        logger.debug("掛載對話上下文欄位失敗", exc_info=True)
 
 
 def _attach_scenario_report(response: W1Response, messages: list, record) -> None:
@@ -683,6 +872,13 @@ def process_whatif_request(
     broadcast_loading_complete_sync(ws_broadcaster, correlation_id=effective_correlation_id)
 
     # 5. W2 記錄回覆
+    #
+    # `assumption_scope` 一定要傳下去：`handle_message()` 已經決定這輪不把舊假設
+    # 帶進 prompt 了，若 session 裡還留著，下一輪的追問（carry）會把它們原封不動
+    # 撈回來，等於白清一場。
+    #
+    # `context_snapshot` 是下一輪 diff 「情況變了什麼」的基準，必須存**回答當下**
+    # 的世界，不是下次讀取時的世界。
     record_response(
         session_id=session_id,
         user_message=content,
@@ -691,7 +887,18 @@ def process_whatif_request(
         if response.triggered_sops
         else None,
         new_assumptions=_assumptions_from_response(response),
+        assumption_scope=getattr(context, "assumption_scope", "carry"),
+        context_snapshot=snapshot_of(_current_incident_record()),
     )
+
+    # 回覆帶回 session 裡**最終**生效的假設（前端 chips 依此渲染）。
+    # 不能沿用 context 那份——LLM 這輪可能又新增了假設，那些也要顯示。
+    try:
+        from src.session.session_manager import get_assumptions
+
+        response.active_assumptions = get_assumptions(session_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("讀取生效假設失敗", exc_info=True)
 
     # 6. 冗餘推播 chat.response.v1（多分頁/多人同時看同一對話的保底管道）
     if ws_broadcaster is not None:

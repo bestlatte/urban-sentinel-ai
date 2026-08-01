@@ -71,8 +71,13 @@ def get_roaming_ratio(bundle: NormalizedDataBundle, station_id: str, as_of: date
     return sample.roaming_user_pct
 
 
-def determine_level(rule_hits: list[RuleHit], saturation_score: float | None = None) -> TrafficLevel:
+def determine_level(rule_hits: list[RuleHit]) -> TrafficLevel:
     """P5：交通等級判定。從 rule_hits 中找 SOP-1 命中，回傳最高等級。
+
+    [2026-08-02] 移除沒有作用的 `saturation_score` 參數。它從來沒有被讀取過，
+    全 repo 也沒有任何呼叫端傳過它——留著只會讓人以為「傳一個飽和度進去可以
+    影響判定」，實際上傳了完全沒事發生。真的要算單一路段請用
+    `determine_level_for_segment()`。
 
     門檻（02-data-contract.md §4，適用全 15 路段）：
         saturation_score >= 0.95 → A
@@ -113,6 +118,149 @@ def determine_level_for_segment(
     return "normal"
 
 
+# ---------------------------------------------------------------------------
+# EvidenceRef 的人話化（唯一來源）
+#
+# [2026-08-02] `EvidenceRef` 的 field/value/threshold 是**給程式比對用的**，
+# 三個欄位加起來就是一條規則的判定依據。前端原本直接把它們串起來顯示，
+# 於是「適用條款」面板長成這樣：
+#
+#     SOP-2  光復南路
+#     status+severity Closed/Critical 門檻 Closed|Blocked|Restricted + High|Critical
+#
+# 數值型的（飽和度 0.9 門檻 0.85）這樣看還可以，但列舉與組合條件就變成
+# 內部代碼直接漏到指揮官面前。判定邏輯寫在本檔，措辭就該跟著寫在本檔——
+# 放前端會漂移（門檻改了、文案沒改），放 whatif_engine 則只有對話用得到。
+# ---------------------------------------------------------------------------
+
+_FIELD_LABELS: dict[str, str] = {
+    "saturation_score": "飽和度",
+    "status+severity": "路段狀態與嚴重度",
+    "growth_rate": "人流成長率",
+    "user_count": "站點人數",
+    "peak_user_count+growth_rate": "散場人流判定",
+    "SOP-4_cascade": "SOP-4 連動觸發",
+    "incident_type": "事件類型",
+    "roaming_user_pct": "境外漫遊比率",
+    "incident_exists": "進行中事件",
+}
+
+_STATUS_LABELS: dict[str, str] = {
+    "Closed": "全線封閉",
+    "Blocked": "阻斷",
+    "Restricted": "車道管制",
+    "Caution": "注意",
+    "Open": "正常通行",
+    "Partial_Open": "部分開放",
+    "Resolved": "已解除",
+}
+
+_SEVERITY_LABELS: dict[str, str] = {
+    "Critical": "極嚴重",
+    "High": "高",
+    "Medium": "中",
+    "Low": "低",
+}
+
+_INCIDENT_TYPE_LABELS: dict[str, str] = {
+    "Road_Collapse_Accident": "路面塌陷",
+    "Traffic_Accident": "交通事故",
+    "Vehicle_Fire": "車輛火警",
+    "Crowd_Surge_Injury": "人群推擠傷亡",
+    "Large_Event_Dispersal": "大型活動散場",
+    "Power_Failure": "號誌／電力故障",
+    "Water_Main_Break": "水管破裂",
+    "Debris_On_Road": "路面掉落物",
+}
+
+
+def _pct(value) -> str:
+    """0.30 → 「30%」。人流成長率與漫遊比率用百分比比小數好讀。"""
+    try:
+        return f"{float(value) * 100:.0f}%"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def describe_evidence(field: str, value, threshold) -> dict[str, str]:
+    """把一條 `EvidenceRef` 轉成三段人話：欄位名、實際值、門檻。
+
+    回傳 `{"field_label", "value_label", "threshold_label"}`，
+    呼叫端要湊成什麼句子由呼叫端決定（前端的排版與建議書的敘述不同）。
+    無法辨識的 field 一律退回原字串——寧可顯示原始代碼，也不要編一個看起來
+    很合理但其實對不上判定邏輯的說法。
+    """
+    label = _FIELD_LABELS.get(field, field)
+
+    if field == "status+severity":
+        # value 形如 "Closed/Critical"；threshold 是三種狀態 × 兩種嚴重度的組合
+        status, _, severity = str(value).partition("/")
+        value_label = (
+            f"{_STATUS_LABELS.get(status, status)}／嚴重度{_SEVERITY_LABELS.get(severity, severity)}"
+        )
+        return {
+            "field_label": label,
+            "value_label": value_label,
+            "threshold_label": "封閉、阻斷或管制，且嚴重度為高或極嚴重",
+        }
+
+    if field == "incident_type":
+        return {
+            "field_label": label,
+            "value_label": _INCIDENT_TYPE_LABELS.get(str(value), str(value)),
+            "threshold_label": _INCIDENT_TYPE_LABELS.get(str(threshold), str(threshold)),
+        }
+
+    if field == "incident_exists":
+        # SOP-7 不是門檻型規則，它只是「有事件就要算 ETE」。
+        # 顯示成「incident_exists WHATIF_RD_TPE_002 門檻 any_incident」毫無意義。
+        return {
+            "field_label": label,
+            "value_label": str(value),
+            "threshold_label": "有進行中事件即需推算恢復時間",
+        }
+
+    if field in ("growth_rate", "roaming_user_pct"):
+        return {
+            "field_label": label,
+            "value_label": _pct(value),
+            "threshold_label": _pct(threshold),
+        }
+
+    if field == "peak_user_count+growth_rate":
+        # value 形如 "peak=31000,growth=-0.25"
+        parts = dict(
+            p.split("=", 1) for p in str(value).split(",") if "=" in p
+        )
+        peak = parts.get("peak", "?")
+        growth = parts.get("growth", "?")
+        return {
+            "field_label": label,
+            "value_label": f"歷史峰值 {peak} 人、成長率 {_pct(growth)}",
+            "threshold_label": "峰值達 30000 人且成長率降至 -20% 以下",
+        }
+
+    if field == "SOP-4_cascade":
+        return {
+            "field_label": label,
+            "value_label": "大巨蛋散場已觸發",
+            "threshold_label": "SOP-4 命中時自動連動 SOP-3",
+        }
+
+    if field == "user_count":
+        return {
+            "field_label": label,
+            "value_label": f"{value} 人",
+            "threshold_label": f"{threshold} 人",
+        }
+
+    return {
+        "field_label": label,
+        "value_label": str(value),
+        "threshold_label": str(threshold),
+    }
+
+
 def evaluate_rules(
     bundle: NormalizedDataBundle,
     incident: Incident | None = None,
@@ -140,10 +288,21 @@ def evaluate_rules(
     事故時間），而不是被迫接受一個隱藏的預設值。
     """
     # 決定 as_of 時間
+    #
+    # [2026-08-02] 中間插入「模擬器時刻」這一段。原本 incident=None 時直接跳到
+    # 資料集最晚時間（23:30），於是**模擬器停在 22:10，Dashboard 的應變等級卻是
+    # 23:30 算出來的**——F1 KPI、rules.evaluated.v1 推播、啟動時的全量掃描三處
+    # 全都受影響，畫面上的時間與數字對不起來。
+    #
+    # 資料集最晚時間仍是最後的退路（模擬器沒啟用時），行為不變。
     if as_of is None:
         if incident is not None:
             as_of = incident.timestamp
         else:
+            from src import clock
+
+            as_of = clock.simulation_time()
+        if as_of is None:
             # 取 bundle 中所有時間戳的最大值
             timestamps = [t.timestamp for t in bundle.traffic] + [c.timestamp for c in bundle.crowd]
             as_of = max(timestamps) if timestamps else bundle.loaded_at

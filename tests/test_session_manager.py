@@ -113,3 +113,118 @@ def test_accumulated_assumptions_passed_to_context():
     record_response("sess-1", "q1", "a1", new_assumptions={"RD_TPE_002.status": "Closed"})
     ctx = handle_message("sess-1", "q2")
     assert ctx.accumulated_assumptions == {"RD_TPE_002.status": "Closed"}
+
+
+# ---------------------------------------------------------------------------
+# [2026-08-02] 假設的生命週期：新的假設情境不得沿用舊假設
+#
+# 使用者回報「chatbot 對是否是追問還是新問題很不懂」。真正的原因不是分類器，
+# 是 `Session.assumptions` 同 key 覆蓋、不同 key 永久累加、永不過期，
+# 而 prompt 明文要求把累積假設一併帶入 simulate_scenario。
+# ---------------------------------------------------------------------------
+
+from src.session.session_manager import (
+    resolve_assumption_scope,
+    drop_assumption,
+    get_assumptions,
+)
+
+
+def test_scope_new_hypothesis_replaces():
+    """「如果X」是一個獨立情境，不該把先前的假設拖進來。"""
+    assert resolve_assumption_scope("如果光復南路坍塌會怎樣") == "replace"
+    assert resolve_assumption_scope("假設市民大道四段飽和度到 0.98") == "replace"
+    assert resolve_assumption_scope("萬一號誌全部故障呢") == "replace"
+
+
+def test_scope_explicit_continuation_merges():
+    """明說要疊加才疊加——「同時」「再加上」這種措辭。"""
+    assert resolve_assumption_scope("如果光復南路同時也坍塌呢") == "merge"
+    assert resolve_assumption_scope("假設在此基礎上市民大道再加上事故") == "merge"
+
+
+def test_scope_plain_followup_carries():
+    """對**現有情境**的追問必須留著假設。
+
+    這條最容易被忽略但最重要：使用者問「那 ETE 呢」時，若把假設清掉，
+    他會突然變成在問一個沒有假設的世界，而畫面上什麼跡象都沒有。
+    """
+    assert resolve_assumption_scope("那 ETE 呢") == "carry"
+    assert resolve_assumption_scope("為什麼建議走市民大道") == "carry"
+    assert resolve_assumption_scope("這起事件該怎麼處理") == "carry"
+
+
+def test_new_hypothesis_does_not_carry_previous_assumptions():
+    """端到端：先假設基隆路，再假設光復南路 → 第二題不得帶著基隆路。"""
+    handle_message("s", "如果基隆路一段坍塌")
+    record_response(
+        "s", "如果基隆路一段坍塌", "答1",
+        new_assumptions={"RD_TPE_003.status": "Closed"},
+        assumption_scope="replace",
+    )
+
+    ctx = handle_message("s", "如果光復南路坍塌呢")
+    assert ctx.assumption_scope == "replace"
+    assert ctx.accumulated_assumptions == {}, "新的獨立情境不得沿用舊假設"
+    assert ctx.dropped_assumptions == {"RD_TPE_003.status": "Closed"}, (
+        "被丟掉的假設要回報，讓使用者知道系統做了這個決定"
+    )
+
+
+def test_replace_also_clears_the_stored_assumptions():
+    """清掉的假設不能在下一輪追問（carry）時被撈回來。
+
+    `handle_message()` 只決定「這輪不帶進 prompt」；若 session 裡還留著，
+    下一句「那 ETE 呢」是 carry，就會把它們原封不動撈回來，等於白清一場。
+    """
+    handle_message("s", "如果基隆路一段坍塌")
+    record_response("s", "如果基隆路一段坍塌", "答1",
+                    new_assumptions={"RD_TPE_003.status": "Closed"},
+                    assumption_scope="replace")
+
+    handle_message("s", "如果光復南路坍塌呢")
+    record_response("s", "如果光復南路坍塌呢", "答2",
+                    new_assumptions={"RD_TPE_002.status": "Closed"},
+                    assumption_scope="replace")
+
+    ctx = handle_message("s", "那 ETE 呢")
+    assert ctx.assumption_scope == "carry"
+    assert ctx.accumulated_assumptions == {"RD_TPE_002.status": "Closed"}
+    assert "RD_TPE_003.status" not in ctx.accumulated_assumptions
+
+
+def test_explicit_merge_keeps_both():
+    handle_message("s", "如果基隆路一段坍塌")
+    record_response("s", "如果基隆路一段坍塌", "答1",
+                    new_assumptions={"RD_TPE_003.status": "Closed"},
+                    assumption_scope="replace")
+
+    ctx = handle_message("s", "如果光復南路同時也坍塌呢")
+    assert ctx.assumption_scope == "merge"
+    assert ctx.accumulated_assumptions == {"RD_TPE_003.status": "Closed"}
+
+    record_response("s", "如果光復南路同時也坍塌呢", "答2",
+                    new_assumptions={"RD_TPE_002.status": "Closed"},
+                    assumption_scope="merge")
+    assert set(get_assumptions("s")) == {"RD_TPE_003.status", "RD_TPE_002.status"}
+
+
+def test_drop_single_assumption():
+    """chip 按 × 只移除那一項，其餘保留。"""
+    handle_message("s", "q")
+    record_response("s", "q", "a", new_assumptions={
+        "RD_TPE_002.status": "Closed",
+        "RD_TPE_004.saturation_score": 0.98,
+    })
+    remaining = drop_assumption("s", "RD_TPE_002.status")
+    assert remaining == {"RD_TPE_004.saturation_score": 0.98}
+
+
+def test_turn_stores_context_snapshot_for_change_detection():
+    """快照要跟著 Turn 存下來，下一輪才 diff 得出「情況變了什麼」。"""
+    handle_message("s", "q1")
+    snap = {"trace_id": "TR-1", "primary": {"segment_id": "RD_TPE_004"}}
+    record_response("s", "q1", "a1", context_snapshot=snap)
+
+    ctx = handle_message("s", "q2")
+    assert ctx.last_snapshot == snap

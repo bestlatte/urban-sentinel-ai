@@ -780,6 +780,23 @@ def build_judgment_basis(
             # 措辭刻意跟風險推演的 `no_safe_route`（「推演後都會飽和」）分開。
             # 兩者一個是現在沒得選、一個是現在有得選但撐不久，混用會誤導處置。
             parts.append("**路網重規劃**：目前無合格替代路線（所有候選都被排除）")
+        elif route_plan.all_alternatives_saturated:
+            # 第三種狀態：有指派，但指派的本身就是塞的。少了這一支，
+            # 使用者問「如果仁愛路也塞了呢」會得到跟一切正常時一樣的答覆。
+            parts.append(
+                "**路網重規劃**：⚠️ 目前無路段可以替補——周邊候選全數飽和，"
+                "下列路線為 SOP-2 §2a 例外的權宜指派，本身仍處於飽和狀態"
+            )
+            if route_plan.primary:
+                parts.append(
+                    f"**權宜主線**：{route_plan.primary.name}"
+                    f"（{route_plan.primary.segment_id}，飽和度 {route_plan.primary.saturation_score}）"
+                )
+            if route_plan.secondary:
+                parts.append(
+                    f"**權宜次線**：{route_plan.secondary.name}"
+                    f"（{route_plan.secondary.segment_id}，飽和度 {route_plan.secondary.saturation_score}）"
+                )
         else:
             if route_plan.primary:
                 parts.append(f"**主要替代路線**：{route_plan.primary.name}（{route_plan.primary.segment_id}）")
@@ -901,10 +918,15 @@ _FIELD_LABELS = {
     "roaming_user_pct": "漫遊比率",
     "stay_time_avg": "平均停留",
 }
-"""欄位機器名 → 中文標籤。前端推理鏈顯示用。
+"""**假設欄位**（使用者可以覆寫的資料欄位）的機器名 → 中文標籤。
 
 放後端而不是前端：欄位清單的權威來源已經是 `supported_fields()`，標籤跟著
 它走才不會出現「後端支援新欄位、畫面顯示英文變數名」的漂移。
+
+注意這張表跟 `rules.describe_evidence()` 的職責不同，不要合併：
+這裡是「使用者假設改了哪個欄位」，那邊是「規則用哪個依據判定命中」。
+兩者剛好有幾個同名欄位（飽和度、成長率），但一個描述輸入、一個描述判定，
+措辭與門檻語意都不一樣。
 """
 
 
@@ -997,17 +1019,22 @@ def build_judgment_steps(
         ev = hit.evidence
         target = hit.segment_id or hit.station_id or ""
         relation, relation_label = _relation_of(hit)
+        # 判定依據的措辭一律走 rules.describe_evidence()——它跟門檻寫在同一個
+        # 檔案，改門檻時不會忘了改文案。前端優先讀 *_label，讀不到才退回原始值。
+        from src.rules import describe_evidence
+
+        described = describe_evidence(ev.field, ev.value, ev.threshold)
         item = {
             "clause_id": hit.clause_id,
             "target": target,
             "target_name": _entity_display_name(bundle, target) if target else "",
             "field": ev.field,
-            "field_label": _FIELD_LABELS.get(ev.field, ev.field),
             "value": ev.value,
             "threshold": ev.threshold,
             "is_primary": hit.is_primary,
             "relation": relation,
             "relation_label": relation_label,
+            **described,
         }
         # ratio 讓前端畫「實際值 vs 門檻」的比例條。只有兩邊都是數字時才算得出來
         # （SOP-2 的 evidence 是 "Closed/Critical" 這種字串，沒有比例可言）。
@@ -1095,7 +1122,10 @@ def build_judgment_steps(
             "stage": "routes",
             "title": "路線規劃",
             "items": route_items,
-            "extra": {"no_feasible_route": route_plan.no_feasible_route},
+            "extra": {
+                "no_feasible_route": route_plan.no_feasible_route,
+                "all_alternatives_saturated": route_plan.all_alternatives_saturated,
+            },
         })
 
     # --- 恢復時間 ---

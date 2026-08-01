@@ -1,0 +1,21 @@
+06:22:38 [INFO] src.env: 已從 C:\Users\User\urban-sentinel-ai\.env 載入 12 個環境變數：AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY, BEDROCK_KNOWLEDGE_BASE_ID, BEDROCK_MODEL_ID, DECISION_LOG_TABLE, LINE_CHANNEL_ACCESS_TOKEN, LINE_ENABLED, LINE_TO_USER_ID, S3_DATA_BUCKET, USE_BEDROCK, USE_STUB_MODULES
+INFO:     Started server process [33616]
+INFO:     Waiting for application startup.
+06:22:43 [INFO] src.bedrock_status: Bedrock 恢復可用（model=global.anthropic.claude-sonnet-4-5-20250929-v1:0）
+06:22:43 [WARNING] src.loaders: intersections 含外部交會點: 正氣橋 (in RD_TPE_009)（同類警告本次啟動後不再重複）
+06:22:43 [INFO] main: 啟動時規則掃描完成：4 條規則觸發
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:53863 - "WebSocket /ws" [accepted]
+INFO:     connection open
+06:27:25 [INFO] main: [模擬 21:02] 忠孝東路四段 等級變化: normal → B
+06:27:25 [INFO] main: [模擬 21:02] 光復南路 等級變化: normal → B
+06:27:25 [INFO] main: [模擬 21:02] 基隆路一段 等級變化: normal → B
+06:27:26 [INFO] main: [模擬 22:01] 忠孝東路四段 等級變化: B → A
+06:27:26 [INFO] main: [模擬 22:01] 光復南路 等級變化: B → A
+06:27:26 [INFO] main: [模擬 22:01] 基隆路一段 等級變化: B → A
+06:27:37 [INFO] main: [評估時刻] 事件 TPE_2026_ACC_001 使用 2026-05-20 22:11（來源：simulation）
+06:27:41 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_ACC_001）: RAG_SEARCH → GRAPH_BUILD → UPSTREAM_JUDGE → CANDIDATE_FILTER → ROUTE_SELECT → CALC_ETE → FORMAT_REPORT
+06:28:02 [INFO] src.line_notify: LINE 通報已送出（broadcast，134 字）
+06:28:18 [INFO] src.line_notify: LINE 通報已送出（broadcast，155 字）
+06:28:29 [INFO] src.line_notify: LINE 通報已送出（broadcast，278 字）

@@ -89,6 +89,30 @@ class W1Response:
     對話裡問「這樣改道會有什麼問題」時，答案跟 Dashboard 建議書上那張圖
     必然一致——兩邊來自同一次推演。
     """
+    context_as_of: str | None = None
+    """本次回答所依據的世界時刻（ISO 字串）。
+
+    [2026-08-02] 前端把它記在 AI 泡泡上，之後情況一變就能把舊泡泡標成
+    「依據 22:15・已更新」。使用者往上捲回去看時不會被舊數字誤導——
+    在一個路況每十五分鐘就會翻盤的系統裡，這比多講一句話重要。
+    """
+    active_assumptions: dict = field(default_factory=dict)
+    """目前生效中的假設條件，前端畫成可個別移除的 chips。
+
+    把隱形狀態變成可見狀態：使用者隨時知道系統正拿什麼在算。
+    在此之前這份 dict 只存在於後端記憶體，累積了什麼完全看不出來。
+    """
+    dropped_assumptions: dict = field(default_factory=dict)
+    """本輪因為「這是新的假設情境」而被清掉的舊假設。
+
+    丟掉不能是靜默的——系統替使用者做了一個判斷，就必須告訴他做了什麼。
+    """
+    situation_changed: bool = False
+    """自上一輪回答以來，路線／可替補狀態／ETE／建議書有實質改變。
+
+    前端據此在回覆上方加一條醒目的「情況已更新」提示；模型那邊則由
+    `build_change_block()` 注入的區塊要求它在開頭主動說明。
+    """
     trace_steps: list[dict] = field(default_factory=list)
     """[2026-08-02 已停用，恆為空陣列]
 

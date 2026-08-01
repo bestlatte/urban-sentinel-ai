@@ -110,9 +110,9 @@ function _renderRuleItem(item) {
     </div>
     <div class="rc-rule-meta">
       ${escapeHtml(item.field_label || item.field || "")}
-      <strong>${escapeHtml(_fmtNum(item.value))}</strong>
-      ${item.threshold !== null && item.threshold !== undefined
-        ? `<span class="rc-threshold">門檻 ${escapeHtml(_fmtNum(item.threshold))}</span>`
+      <strong>${escapeHtml(item.value_label != null ? item.value_label : _fmtNum(item.value))}</strong>
+      ${(item.threshold_label != null || (item.threshold !== null && item.threshold !== undefined))
+        ? `<span class="rc-threshold">門檻 ${escapeHtml(item.threshold_label != null ? item.threshold_label : _fmtNum(item.threshold))}</span>`
         : ""}
     </div>
     ${hasBar ? `<div class="rc-bar">
@@ -192,8 +192,11 @@ function _renderRoutesStage(step) {
   //   no_feasible_route（本階段）= **現在就**找不到合格路線
   //   no_safe_route（風險推演）   = 現在有路，但推演後都會飽和
   // 兩者操作意義完全不同，之前都顯示成「無可行替代路線」，分不出來。
+  //   all_alternatives_saturated（[2026-08-02] 第三種）= 有指派，但指派的本身就是塞的
   const noRouteBanner = extra.no_feasible_route
     ? `<div class="rc-no-route">目前無合格替代路線　—　以下為各候選被排除的原因</div>`
+    : extra.all_alternatives_saturated
+    ? `<div class="rc-no-route">目前無路段可以替補　—　候選全數飽和，下列主/次線為權宜指派</div>`
     : "";
 
   const roleMeta = {

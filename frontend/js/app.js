@@ -270,8 +270,23 @@ function _isRoutesChanged(oldRoutes, newRoutes) {
   const newPrimary = newRoutes.primary?.segment_id;
   const oldSecondary = oldRoutes.secondary?.segment_id;
   const newSecondary = newRoutes.secondary?.segment_id;
-  
-  return oldPrimary !== newPrimary || oldSecondary !== newSecondary;
+
+  if (oldPrimary !== newPrimary || oldSecondary !== newSecondary) return true;
+
+  // [2026-08-02] 只比 segment_id 會漏掉「路線沒換、但路網狀態變了」這種更新：
+  // 重規劃後主線仍是同一條路，卻已經從「暢通」變成「全數飽和的權宜指派」。
+  // 那時這裡回 false → 外層走 trace_id 去重 → trace_id 相同 → 整份新 decision
+  // 被丟掉，卡片上的飽和度與排除清單就停在事故剛發生時的數字。
+  if (
+    !!oldRoutes.no_feasible_route !== !!newRoutes.no_feasible_route ||
+    !!oldRoutes.all_alternatives_saturated !== !!newRoutes.all_alternatives_saturated ||
+    oldRoutes.primary?.saturation_score !== newRoutes.primary?.saturation_score ||
+    oldRoutes.secondary?.saturation_score !== newRoutes.secondary?.saturation_score
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 // ★ 處理 cascade replan 後的 decision 更新（不增加事件計數，只更新顯示）
@@ -977,6 +992,19 @@ function _renderReportContent(decision) {
       html += `<div style="font-size:0.7rem;color:hsl(45,80%,30%);font-weight:700">⚠️ 無可用替代路線</div>`;
       html += `<div style="font-size:0.65rem;color:#4a3728;margin-top:4px">所有候選路段皆已排除，請立即啟動人工指揮或封閉區域</div>`;
       html += `</div>`;
+    } else if (decision.routes.all_alternatives_saturated) {
+      // 候選全數飽和：SOP-2 §2a 例外仍會指派路線，所以 primary 有值，
+      // 但那是權宜指派而非可行替代路線——卡片上必須跟暢通時長得不一樣。
+      html += `<div style="margin-top:4px;padding:8px 10px;background:#F9F0D4;border:1px solid hsl(45,93%,47%);border-radius:6px">`;
+      html += `<div style="font-size:0.7rem;color:hsl(45,80%,30%);font-weight:700">⚠️ 目前無路段可以替補</div>`;
+      html += `<div style="font-size:0.65rem;color:#4a3728;margin-top:4px">周邊候選路段已全數飽和，下列為權宜指派（本身仍壅塞）</div>`;
+      if (decision.routes.primary) {
+        html += `<div style="font-size:0.65rem;color:#34271D;margin-top:4px;font-weight:600">● ${escapeHtml(decision.routes.primary.name)}（飽和度 ${decision.routes.primary.saturation_score ?? "—"}）</div>`;
+      }
+      if (decision.routes.secondary) {
+        html += `<div style="font-size:0.65rem;color:#34271D;font-weight:600">● ${escapeHtml(decision.routes.secondary.name)}（飽和度 ${decision.routes.secondary.saturation_score ?? "—"}）</div>`;
+      }
+      html += `</div>`;
     } else {
       if (decision.routes.primary) {
         const isChanged = decision.routes.primary._changedAt;
@@ -1001,20 +1029,14 @@ function _renderReportContent(decision) {
     
     decision._routeHistory.forEach((change, idx) => {
       const time = change.time ? new Date(change.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : "";
-      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
-      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
-      
+
       html += `<div style="font-size:0.72rem;${idx > 0 ? 'margin-top:8px;padding-top:8px;border-top:1px solid hsl(38,92%,50%,0.2);' : ''}">`;
       html += `<div style="display:flex;justify-content:space-between;margin-bottom:3px">`;
       html += `<span style="color:var(--text-secondary)">第 ${idx + 1} 次重規劃</span>`;
       html += `<span style="color:var(--text-muted);font-size:0.65rem">${time}</span>`;
       html += `</div>`;
-      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(change.reason)}</div>`;
-      html += `<div style="font-size:0.7rem">`;
-      html += `<span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>`;
-      html += ` → `;
-      html += `<span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>`;
-      html += `</div>`;
+      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(_routeChangeReasonText(change))}</div>`;
+      html += `<div style="font-size:0.7rem">${_routeChangeDeltaHtml(change)}</div>`;
       html += `</div>`;
     });
     
@@ -1440,21 +1462,16 @@ function _renderActivityFeed(eventId) {
     if (log.isRouteChange && log.changeRecord) {
       // 路線變更的特殊樣式
       const change = log.changeRecord;
-      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary || "N/A";
-      const newName = _getSegmentName(change.newPrimary) || change.newPrimary || "N/A";
-      
+      const icon = change.noAlternative ? "⚠️" : "🔄";
+
       html += `
         <div style="font-size:0.78rem;padding:10px;margin:6px 0;border-radius:6px;background:rgba(255,150,50,0.1);border:1px solid hsl(38,92%,50%,0.3)">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
             <span style="color:var(--text-muted);min-width:48px;font-variant-numeric:tabular-nums;font-size:0.7rem">${log.time}</span>
-            <span style="color:hsl(38,92%,50%);font-weight:600">🔄 ${log.label}</span>
+            <span style="color:hsl(38,92%,50%);font-weight:600">${icon} ${log.label}</span>
           </div>
-          <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">原因: ${escapeHtml(change.reason)}</div>
-          <div style="font-size:0.72rem;display:flex;align-items:center;gap:8px">
-            <span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>
-            <span style="color:var(--text-muted)">→</span>
-            <span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>
-          </div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:4px">原因: ${escapeHtml(_routeChangeReasonText(change))}</div>
+          <div style="font-size:0.72rem;display:flex;align-items:center;gap:8px">${_routeChangeDeltaHtml(change)}</div>
         </div>
       `;
     } else {
@@ -1538,20 +1555,14 @@ function renderDecisionBasis(decision) {
     
     decision._routeHistory.forEach((change, idx) => {
       const time = change.time ? new Date(change.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : "";
-      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
-      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
-      
+
       html += `<div style="font-size:0.72rem;padding:6px 0;${idx > 0 ? 'border-top:1px solid var(--border);margin-top:6px;' : ''}">`;
       html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">`;
-      html += `<span style="color:hsl(38,92%,50%);font-weight:500">🔄 第 ${idx + 1} 次重規劃</span>`;
+      html += `<span style="color:hsl(38,92%,50%);font-weight:500">${change.noAlternative ? "⚠️" : "🔄"} 第 ${idx + 1} 次重規劃</span>`;
       html += `<span style="font-size:0.65rem;color:var(--text-muted)">${time}</span>`;
       html += `</div>`;
-      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(change.reason)}</div>`;
-      html += `<div style="font-size:0.68rem">`;
-      html += `<span style="color:hsl(0,70%,60%)">✗ ${escapeHtml(oldName)}</span>`;
-      html += ` → `;
-      html += `<span style="color:hsl(142,71%,45%)">✓ ${escapeHtml(newName)}</span>`;
-      html += `</div>`;
+      html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:2px">原因: ${escapeHtml(_routeChangeReasonText(change))}</div>`;
+      html += `<div style="font-size:0.68rem">${_routeChangeDeltaHtml(change)}</div>`;
       html += `</div>`;
     });
     
@@ -1886,8 +1897,8 @@ function onRoutesUpdated(payload) {
   // 保存這次變更記錄
   const changeRecord = {
     time: payload.time || nowSimAwareISO(),
-    reason: payload.affected_route === "primary" ? "主路線飽和" : 
-            payload.affected_route === "secondary" ? "次路線飽和" : 
+    reason: payload.affected_route === "primary" ? "主路線飽和" :
+            payload.affected_route === "secondary" ? "次路線飽和" :
             payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和",
     oldPrimary: payload.old_primary,
     newPrimary: payload.new_primary,
@@ -1895,11 +1906,21 @@ function onRoutesUpdated(payload) {
     newSecondary: payload.new_secondary,
     invalidReasons: payload.invalid_reasons || {},
     replanCount: payload.replan_count || 1,
+    routeChanged: payload.route_changed !== false,
+    noAlternative: payload.no_alternative_available === true,
   };
   decision._routeHistory.push(changeRecord);
   
   // 更新 routes 資訊（保留原始資料供比對）
   if (decision.routes) {
+    // 路網狀態旗標要跟著更新，否則決策卡片會停在「有可行替代路線」的樣子，
+    // 即使後端這次回報的是「候選全數飽和、已無路可替補」。
+    if (payload.no_feasible_route !== undefined) {
+      decision.routes.no_feasible_route = payload.no_feasible_route;
+    }
+    if (payload.all_alternatives_saturated !== undefined) {
+      decision.routes.all_alternatives_saturated = payload.all_alternatives_saturated;
+    }
     // 標記原始路線（只在第一次變更時記錄）
     if (!decision.routes._originalPrimary && decision.routes.primary) {
       decision.routes._originalPrimary = {
@@ -1915,7 +1936,10 @@ function onRoutesUpdated(payload) {
     }
     
     // 更新主路線
-    if (payload.new_primary && decision.routes.primary) {
+    if (payload.new_primary) {
+      // 原本要求 `decision.routes.primary` 已存在才更新；上一次重規劃把次線
+      // 清成 null 之後，下一次重規劃又選出次線時就會整條被吃掉。改成沒有就補一個殼。
+      if (!decision.routes.primary) decision.routes.primary = { segment_id: payload.new_primary };
       decision.routes.primary.segment_id = payload.new_primary;
       const newPrimaryName = _getSegmentName(payload.new_primary);
       if (newPrimaryName) decision.routes.primary.name = newPrimaryName;
@@ -1924,13 +1948,14 @@ function onRoutesUpdated(payload) {
     }
     // 更新次路線
     if (payload.new_secondary !== undefined) {
-      if (payload.new_secondary && decision.routes.secondary) {
+      if (payload.new_secondary) {
+        if (!decision.routes.secondary) decision.routes.secondary = { segment_id: payload.new_secondary };
         decision.routes.secondary.segment_id = payload.new_secondary;
         const newSecondaryName = _getSegmentName(payload.new_secondary);
         if (newSecondaryName) decision.routes.secondary.name = newSecondaryName;
         decision.routes.secondary._changedAt = changeRecord.time;
         decision.routes.secondary._changedReason = changeRecord.reason;
-      } else if (!payload.new_secondary) {
+      } else {
         // 次路線變成 null
         decision.routes.secondary = null;
       }
@@ -1982,17 +2007,24 @@ function _appendRouteChangeToActivity(eventId, changeRecord) {
   const eventData = _activityByEvent.get(eventId);
   const time = formatTime(changeRecord.time);
   
-  // 組成變更說明
+  // 組成變更說明。三種結果的文字必須不一樣，否則活動紀錄上
+  // 「已無路可替補」跟「成功換到新路」長得一模一樣（見 _showRouteUpdateAlert）。
   let detail = changeRecord.reason;
-  if (changeRecord.oldPrimary && changeRecord.newPrimary) {
+  if (changeRecord.noAlternative) {
+    const keptName = _getSegmentName(changeRecord.newPrimary) || changeRecord.newPrimary;
+    detail += ` | ⚠️ 目前無路段可替補${keptName ? `，權宜維持 ${keptName}（仍飽和）` : ""}`;
+  } else if (!changeRecord.routeChanged) {
+    const keptName = _getSegmentName(changeRecord.newPrimary) || changeRecord.newPrimary;
+    detail += ` | 重新評估後維持 ${keptName}`;
+  } else if (changeRecord.oldPrimary && changeRecord.newPrimary) {
     const oldName = _getSegmentName(changeRecord.oldPrimary);
     const newName = _getSegmentName(changeRecord.newPrimary);
     detail += ` | ${oldName} → ${newName}`;
   }
-  
+
   eventData.logs.push({
     time,
-    label: "路線重規劃",
+    label: changeRecord.noAlternative ? "無路可替補" : "路線重規劃",
     detail,
     color: "hsl(38, 92%, 50%)",  // 橘色警告色
     isRouteChange: true,
@@ -2017,30 +2049,65 @@ function _showRouteUpdateAlert(payload) {
   
   const oldPrimaryName = _getSegmentName(payload.old_primary) || payload.old_primary || "N/A";
   const newPrimaryName = _getSegmentName(payload.new_primary) || payload.new_primary || null;
-  const reason = payload.affected_route === "primary" ? "主路線飽和" : 
-                 payload.affected_route === "secondary" ? "次路線飽和" : 
+  const newSecondaryName = _getSegmentName(payload.new_secondary) || payload.new_secondary || null;
+  const reason = payload.affected_route === "primary" ? "主路線飽和" :
+                 payload.affected_route === "secondary" ? "次路線飽和" :
                  payload.affected_route === "both" ? "主次路線皆飽和" : "路線飽和";
-  
-  // 如果沒有新路線可用，用黃色嚴重警告格式
-  if (!newPrimaryName) {
+
+  // 「已無可替補路段」用黃色嚴重警告格式。
+  //
+  // [2026-08-02 修正] 原本的條件只有 `!newPrimaryName`，也就是後端必須回傳
+  // new_primary=null 才會走到這裡。但候選全數飽和時 routing 依 SOP-2 §2a 例外
+  // 仍會指派一條飽和路線，new_primary 永遠有值 —— 這個分支因此**從來沒有被執行過**。
+  // 使用者看到的是「🔄 路線更新 ／ ✗ 原路線: 市民大道四段 ／ ✓ 新路線: 市民大道四段」。
+  // 現在改成看後端明確給的 no_alternative_available 旗標。
+  const noAlternative = payload.no_alternative_available === true || !newPrimaryName;
+  if (noAlternative) {
     const alertEl = document.createElement("div");
     alertEl.className = "alert-item level-medium";
     alertEl.id = alertId;
     alertEl.style.cssText = "border-left-color: hsl(45,93%,47%); background: #F9F0D4;";
+    // 有指派飽和路線時要把它寫出來——指揮官仍然需要知道車流現在被導去哪裡，
+    // 只是必須同時知道那條路本身也是塞的。
+    const fallbackRouteHtml = newPrimaryName
+      ? `<div class="alert-item-extra" style="color:#4a3728;margin-top:6px;padding:6px;background:rgba(52,39,29,0.08);border-radius:4px;font-size:0.72rem">
+           <div>權宜指派（該路線本身仍飽和）：${escapeHtml(newPrimaryName)}${newSecondaryName ? `、${escapeHtml(newSecondaryName)}` : ""}</div>
+         </div>`
+      : "";
     alertEl.innerHTML = `
       <div class="alert-item-header">
         <span class="alert-item-level" style="color:hsl(45,80%,30%);font-weight:700">⚠️ 嚴重警告</span>
         <span class="alert-item-time">${payload.time ? new Date(payload.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : ""}</span>
       </div>
-      <div class="alert-item-road" style="color:#34271D;font-size:0.9rem;font-weight:700">無可用替代路線</div>
-      <div class="alert-item-desc" style="color:#4a3728;font-weight:500">事件 ${escapeHtml(payload.event_id || "")}：${escapeHtml(reason)}，已無可用替代路段</div>
-      <div class="alert-item-extra" style="color:#665244;font-weight:600">請立即啟動人工指揮或封閉區域</div>
+      <div class="alert-item-road" style="color:#34271D;font-size:0.9rem;font-weight:700">目前無路段可以替補</div>
+      <div class="alert-item-desc" style="color:#4a3728;font-weight:500">事件 ${escapeHtml(payload.event_id || "")}：${escapeHtml(reason)}，周邊候選路段已全數飽和</div>
+      ${fallbackRouteHtml}
+      <div class="alert-item-extra" style="color:#665244;font-weight:600">請立即啟動人工指揮或封閉區域，並同步宣導改用大眾運輸</div>
       <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')" style="background:#34271D;color:#F9F0D4;font-weight:600">確認</button>
     `;
     stack.appendChild(alertEl);
     return;
   }
-  
+
+  // 重規劃跑過但主/次線一條都沒換：說「已重新規劃替代路線」並列出一模一樣的
+  // 新舊路線，比不通知更糟——那會讓指揮官以為系統剛剛換過路。
+  if (payload.route_changed === false) {
+    const alertEl = document.createElement("div");
+    alertEl.className = "alert-item level-b";
+    alertEl.id = alertId;
+    alertEl.innerHTML = `
+      <div class="alert-item-header">
+        <span class="alert-item-level">🔄 路線重新評估</span>
+        <span class="alert-item-time">${payload.time ? new Date(payload.time).toLocaleTimeString("zh-TW", {hour: "2-digit", minute: "2-digit"}) : ""}</span>
+      </div>
+      <div class="alert-item-road">事件 ${escapeHtml(payload.event_id || "")}</div>
+      <div class="alert-item-desc">${escapeHtml(reason)}，重新評估後 ${escapeHtml(newPrimaryName)} 仍是現有候選中最佳選擇</div>
+      <button class="alert-item-close" onclick="dismissAlertItem('${alertId}')">確認</button>
+    `;
+    stack.appendChild(alertEl);
+    return;
+  }
+
   const alertEl = document.createElement("div");
   alertEl.className = "alert-item level-b";
   alertEl.id = alertId;
@@ -2059,6 +2126,53 @@ function _showRouteUpdateAlert(payload) {
   `;
   
   stack.appendChild(alertEl);
+}
+
+// ---------------------------------------------------------------------------
+// 路線變更的顯示文字（單一來源）
+//
+// [2026-08-02] 這段文字原本在四個地方各寫一次：決策卡片的變更歷史、活動面板的
+// feed、決策依據面板、報告頁的變更歷史。四份都寫死成 `✗ 舊 → ✓ 新`，於是候選
+// 全數飽和、重規劃選回同一條路時，四個地方一起顯示
+//
+//     原因：主次路線皆飽和    ✗ 市民大道四段 → ✓ 市民大道四段
+//
+// ——同一條路同時是被淘汰的與新採用的。修彈窗那一份不會讓其他三份跟著好，
+// 所以改成共用這兩個函式；以後要調整措辭只有一個地方要改。
+// ---------------------------------------------------------------------------
+
+/** 變更原因文字：飽和來源 + 「有沒有路可替補」的結論。 */
+function _routeChangeReasonText(change) {
+  const base = change.reason || "路線失效";
+  if (change.noAlternative) return `${base}｜⚠️ 目前無適合路徑可替補`;
+  if (change.routeChanged === false) return `${base}｜重新評估後未更換路線`;
+  return base;
+}
+
+/** 變更結果那一行：三種結局的呈現必須彼此不同。 */
+function _routeChangeDeltaHtml(change, opts) {
+  const o = opts || {};
+  const oldColor = o.oldColor || "hsl(0,70%,60%)";
+  const newColor = o.newColor || "hsl(142,71%,45%)";
+  const warnColor = o.warnColor || "hsl(45,80%,45%)";
+  const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary || "N/A";
+  const newName = _getSegmentName(change.newPrimary) || change.newPrimary || null;
+
+  // 已無可替補路段：不畫成「換路成功」。指揮官仍需知道車流被導去哪裡，
+  // 但那條路本身也是塞的，所以標成「權宜維持」而不是「新路線」。
+  if (change.noAlternative) {
+    const kept = newName
+      ? `，權宜維持 ${escapeHtml(newName)}（仍飽和）`
+      : "";
+    return `<span style="color:${warnColor};font-weight:600">⚠️ 無適合路徑可替補${kept}</span>`;
+  }
+  // 重規劃跑過但沒換路
+  if (change.routeChanged === false) {
+    return `<span style="color:var(--text-secondary)">● 維持 ${escapeHtml(newName || oldName)}（現有候選中仍為最佳）</span>`;
+  }
+  return `<span style="color:${oldColor}">✗ ${escapeHtml(oldName)}</span>`
+    + ` <span style="color:var(--text-muted)">→</span> `
+    + `<span style="color:${newColor}">✓ ${escapeHtml(newName || "N/A")}</span>`;
 }
 
 // 輔助函式：從 segment_id 取得路段名稱
@@ -2579,25 +2693,63 @@ async function copyNotification(btn) {
 }
 
 /**
- * 發送至 LINE。目前只有 UI，尚未接通。
+ * 發送至 LINE（`POST /api/notify/line` → LINE Messaging API）。
  *
- * 之後要接的時候，這裡換成 `POST /api/notifications/{event_id}/send`，
- * 後端再走 LINE Messaging API。接收者設定會放在上方的「發送對象」那一欄。
+ * [2026-08-02 接通] 走的是官方帳號的 push／broadcast，不是 LINE Notify
+ * ——後者已於 2025-03-31 終止服務。
+ *
+ * 對外發送是不可逆的動作，所以送出前先確認一次：按鈕就在報告卡片上，
+ * 誤觸的成本是一則真的送到別人手機上的訊息，而且會消耗免費額度。
  */
-function sendNotificationToLine(eventId) {
+async function sendNotificationToLine(eventId) {
   const lang = _notifLangByEvent.get(eventId || "") || "zh";
   const label = _NOTIF_LABEL[lang] || lang;
   const decision = _allDecisions.get(eventId);
-  const text = decision?.notifications?.[lang] || "";
+  const preview = decision?.notifications?.[lang] || "";
 
-  alert(
-    `LINE 發送功能尚未接通。\n\n` +
-    `將送出的內容（${label}）：\n${text}\n\n` +
-    "目前缺兩件事：\n" +
-    "  1. LINE Messaging API 憑證\n" +
-    "  2. 接收者設定（要送給誰）\n\n" +
-    "待接通後，此按鈕會把上面這則訊息送到指定的 LINE 帳號。"
-  );
+  if (!preview) {
+    alert("這起事件還沒有產出通報內容，無法發送。");
+    return;
+  }
+
+  // 設定沒做好就先講清楚該去做什麼，不要送出去才失敗
+  try {
+    const st = await (await fetch("/api/notify/line/status")).json();
+    if (!st.configured) {
+      alert(`LINE 尚未設定完成：${st.reason}\n\n設定步驟見 README「LINE 通報設定」。`);
+      return;
+    }
+    if (!confirm(
+      `確定要發送到 LINE 嗎？（${st.mode === "push" ? "指定帳號" : "官方帳號所有好友"}）\n\n` +
+      `內容（${label}）：\n${preview}`
+    )) return;
+  } catch (e) {
+    alert("無法確認 LINE 設定狀態，請確認後端是否正常運作。");
+    return;
+  }
+
+  try {
+    const resp = await fetch("/api/notify/line", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_id: eventId, lang }),
+    });
+    const data = await resp.json();
+    const p = data.payload || {};
+
+    if (p.ok && p.mode === "skipped") {
+      alert(`未重複發送：${p.detail}`);
+    } else if (p.ok) {
+      alert(`已送出到 LINE（${p.mode === "push" ? "指定帳號" : "所有好友"}）。`);
+    } else {
+      // 診斷訊息是後端翻譯過的「你現在該做什麼」，比原始錯誤碼有用
+      const hint = (p.diagnostics || []).length ? `\n\n${p.diagnostics.join("\n")}` : "";
+      alert(`發送失敗：${p.detail || "未知錯誤"}${hint}`);
+    }
+  } catch (e) {
+    console.warn("[sendNotificationToLine] 失敗:", e);
+    alert("發送失敗：無法連線到後端。");
+  }
 }
 
 /**
@@ -2703,15 +2855,13 @@ function renderReportDetail(decision) {
       const time = change.time
         ? new Date(change.time).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" })
         : "";
-      const oldName = _getSegmentName(change.oldPrimary) || change.oldPrimary;
-      const newName = _getSegmentName(change.newPrimary) || change.newPrimary;
       html += `<div style="font-size:0.8rem;padding:10px 12px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:var(--radius-sm);">
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="color:var(--text-secondary);">第 ${idx + 1} 次重規劃</span>
           <span style="color:var(--text-muted);font-size:0.72rem;">${escapeHtml(time)}</span>
         </div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">原因：${escapeHtml(change.reason || "")}</div>
-        <div><span style="color:var(--level-a);">✗ ${escapeHtml(oldName)}</span> → <span style="color:var(--route-primary);">✓ ${escapeHtml(newName)}</span></div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">原因：${escapeHtml(_routeChangeReasonText(change))}</div>
+        <div>${_routeChangeDeltaHtml(change, { oldColor: "var(--level-a)", newColor: "var(--route-primary)" })}</div>
       </div>`;
     });
     html += `</div></div>`;

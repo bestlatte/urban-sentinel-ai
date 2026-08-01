@@ -257,3 +257,86 @@ def test_determine_level_normal():
 
 
 from src.models import RuleHit, EvidenceRef
+
+
+# ---------------------------------------------------------------------------
+# [2026-08-02] EvidenceRef 人話化：判定依據不得以內部代碼直接顯示給指揮官
+# ---------------------------------------------------------------------------
+
+from src.rules import describe_evidence
+
+
+def test_describe_evidence_status_severity_is_readable():
+    """SOP-2 的組合條件不能原樣輸出。
+
+    使用者實際看到的是：
+        status+severity Closed/Critical 門檻 Closed|Blocked|Restricted + High|Critical
+    那是給程式比對用的字串，不是給人讀的。
+    """
+    d = describe_evidence(
+        "status+severity", "Closed/Critical", "Closed|Blocked|Restricted + High|Critical"
+    )
+    assert d["field_label"] == "路段狀態與嚴重度"
+    assert "全線封閉" in d["value_label"]
+    assert "極嚴重" in d["value_label"]
+    # 門檻要說人話，不能留下管道符號與英文列舉
+    assert "|" not in d["threshold_label"]
+    assert "Closed" not in d["threshold_label"]
+    assert "封閉" in d["threshold_label"]
+
+
+def test_describe_evidence_sop7_is_not_a_threshold_rule():
+    """SOP-7 是「有事件就要算 ETE」，不是門檻比較，不能顯示成 `門檻 any_incident`。"""
+    d = describe_evidence("incident_exists", "WHATIF_RD_TPE_002", "any_incident")
+    assert d["field_label"] == "進行中事件"
+    assert "any_incident" not in d["threshold_label"]
+    assert "恢復時間" in d["threshold_label"]
+
+
+def test_describe_evidence_ratios_render_as_percent():
+    """成長率與漫遊比率用百分比——0.3 這種小數要對照 SOP 原文才知道是 30%。"""
+    assert describe_evidence("roaming_user_pct", 0.42, 0.30)["value_label"] == "42%"
+    assert describe_evidence("growth_rate", 0.35, 0.30)["threshold_label"] == "30%"
+
+
+def test_describe_evidence_keeps_numeric_fields_untouched():
+    """飽和度本來就直觀，不要為了「人話化」把數字改掉。"""
+    d = describe_evidence("saturation_score", 0.9, 0.85)
+    assert d["field_label"] == "飽和度"
+    assert d["value_label"] == "0.9"
+    assert d["threshold_label"] == "0.85"
+
+
+def test_describe_evidence_unknown_field_falls_back_to_raw():
+    """認不得的欄位寧可顯示原始代碼，也不要編一個對不上判定邏輯的說法。"""
+    d = describe_evidence("some_new_field", 1, 2)
+    assert d["field_label"] == "some_new_field"
+    assert d["value_label"] == "1"
+    assert d["threshold_label"] == "2"
+
+
+def test_evaluate_rules_defaults_as_of_to_simulation_time(monkeypatch):
+    """沒有 incident 時，評估時刻要跟著模擬器走，不是跳到資料集最晚時間。
+
+    [2026-08-02] 原本一律用資料集最晚時間（23:30）。模擬器停在 22:10 時，
+    Dashboard 的應變等級、rules.evaluated.v1 推播、啟動掃描三處全都在報
+    23:30 的世界——畫面時間與數字對不起來。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from src import clock
+    from src.loaders import load_data
+    from src.rules import evaluate_rules
+
+    tz = timezone(timedelta(hours=8))
+    sim_now = datetime(2026, 5, 20, 22, 10, tzinfo=tz)
+    monkeypatch.setattr(clock, "simulation_time", lambda: sim_now)
+
+    bundle = load_data()
+    sensing = evaluate_rules(bundle, incident=None)
+    assert sensing.as_of == sim_now
+
+    # 模擬器沒在跑時維持原行為（資料集最晚時間），不影響既有呼叫端
+    monkeypatch.setattr(clock, "simulation_time", lambda: None)
+    latest = max([t.timestamp for t in bundle.traffic] + [c.timestamp for c in bundle.crowd])
+    assert evaluate_rules(bundle, incident=None).as_of == latest

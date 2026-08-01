@@ -12,6 +12,20 @@ const ChatState = {
   hasFirstMessage: false,
   currentCorrelationId: null,
   sessionId: null,
+  assumptions: {},
+  /**
+   * 生效中的假設條件（畫成可個別移除的 chips）。
+   *
+   * [2026-08-02] 這份東西在此之前只存在於後端記憶體的 `Session.assumptions`：
+   * 同 key 覆蓋、**不同 key 永久累加、永不過期**，而使用者完全看不出來累積了
+   * 什麼。先問「如果基隆路塌」再問「光復南路現在怎樣」，第二題仍帶著基隆路的
+   * 假設在算——畫面上沒有任何跡象。顯示出來就不會再有這種隱形狀態。
+   *
+   * 一律以後端回傳的 `active_assumptions` 為準，前端不自行推導：
+   * LLM 這一輪可能又新增了假設，前端猜不到。
+   */
+  lastContextAsOf: null,
+  /** 最近一次回答所依據的世界時刻，用來把更早的泡泡標成已過時。 */
   currentTraceId: null,
   /**
    * 使用者目前正在看的決策週期。

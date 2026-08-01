@@ -37,6 +37,81 @@ USE_BEDROCK=true uvicorn main:app --reload
 
 環境變數完整說明見 [`.env.example`](.env.example)。
 
+## LINE 通報設定
+
+報告卡片上的「發送至 LINE」會把 C4 產出的多語通報送到 LINE 官方帳號。
+
+**先講兩件會省你時間的事：**
+
+- **LINE Notify 已於 2025-03-31 終止服務**，網路上多數「一行 curl 發 LINE」的教學都失效了。現在唯一的路是 Messaging API。
+- push / broadcast 都是**我們主動打出去**的 HTTPS 請求，**不需要 webhook、不需要公開網址、不需要 ngrok**。webhook 只有在要「接收」訊息時才需要。
+
+### 取得憑證（約五分鐘）
+
+#### 情況 A：已經有官方帳號（在 LINE Official Account Manager 建的）
+
+如果你手上只有一個**基本 ID**（`@` 開頭，例如 `@416vdvci`），代表帳號是在
+OA Manager 建的、**還沒開啟 Messaging API**。沒開啟的話 LINE Developers Console
+裡不會有對應的 channel，當然也找不到 token。先補這一步：
+
+1. 到 [LINE Official Account Manager](https://manager.line.biz/) 選該帳號
+2. 右上角 **設定** → 左側選單最下面 **Messaging API**
+3. 點 **啟用 Messaging API** → 選（或現場建立）一個 **Provider**
+4. 完成後該頁會出現 Channel ID 與 Channel secret，接著跳到下面第 4 步去拿 token
+
+#### 情況 B：從零開始
+
+1. 用你的 LINE 帳號登入 [LINE Developers Console](https://developers.line.biz/console/)
+2. 建立一個 **Provider**（名稱隨意，例如 `urban-sentinel`）
+3. 在該 Provider 底下建立 Channel，類型選 **Messaging API**
+   （**不要選 LINE Login**——它的 token 推不了訊息，會回 403）
+
+#### 兩種情況都要做的
+
+4. 進入 channel 的 **Messaging API** 分頁：
+   - 最下方 **Channel access token (long-lived)** → 按 **Issue**，複製 token
+   - 同一頁上方有 **QR code** → **用手機 LINE 掃描，把這個官方帳號加為好友**
+     （這步最常被漏掉；沒加好友就收不到任何訊息，而且 API 會回 400）
+5. 若要指定收件人：**Basic settings** 分頁最下方的 **Your user ID**（`U` 開頭）
+   就是你自己的 userId。不想處理這步就留空，系統會改用 broadcast。
+
+> **四個很像的東西，只有一個是我們要的**（這裡卡住的人最多）：
+>
+> | 你看到的 | 在哪一頁 | 是不是憑證 |
+> |---|---|---|
+> | 基本 ID `@416vdvci` | OA Manager | ✗ 公開帳號名稱，給人搜尋加好友用 |
+> | Channel ID（一串數字） | Basic settings | ✗ |
+> | Channel **secret** | Basic settings | ✗ 最常被誤認成 token |
+> | **Channel access token (long-lived)** | **Messaging API 分頁最下方** | ✓ **就是這個**，通常 170+ 字元 |
+6. 填進 `.env`：
+
+```bash
+LINE_CHANNEL_ACCESS_TOKEN=你剛剛複製的 token
+LINE_TO_USER_ID=            # 留空 = broadcast 給所有好友（個人 Demo 建議留空）
+LINE_ENABLED=true
+```
+
+重啟伺服器讓 `.env` 生效。
+
+### 驗證
+
+```bash
+# 設定狀態（不會回傳 token 本身）
+curl http://127.0.0.1:8000/api/notify/line/status
+
+# 直接送一則測試訊息到你的 LINE
+python -m scripts.send_line_test "測試訊息：城市應變系統連線正常"
+```
+
+手機收到訊息就代表通了。之後在 Reports 頁面選一起事件、按「發送至 LINE」即可。
+
+### 行為與限制
+
+- 送出的是**通報簡訊**（C4 產出，短），不是交控建議書全文——後者好幾百字，手機上是一整片牆
+- **只有按下按鈕才會送**。決策週期與路線重規劃**不會**自動發送：對外發送不可逆，而免費方案每月訊息則數有上限
+- 同樣內容 60 秒內不重送（避免連點與 WebSocket 重連把額度燒在重複訊息上）
+- 送不出去時，錯誤訊息會直接告訴你該做什麼（token 失效、沒加好友、用錯 channel 類型各自對應不同處置）
+
 ## 三筆黃金驗收事件
 
 | 事件 | 類型 | 主因 SOP | 主/次路線 | ETE |

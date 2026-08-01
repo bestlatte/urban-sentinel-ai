@@ -115,6 +115,25 @@ def test_all_candidates_saturated_still_assigns_a_route(bundle: NormalizedDataBu
     assert result.primary.segment_id in finding.segment_ids
     assert "長綠燈" in str(finding.evidence)
 
+    # [2026-08-02] 「有指派」不等於「有路可替補」。這個旗標是下游（orchestrator
+    # 重規劃、WS payload、前端警示、建議書）判斷該不該喊「目前無路段可以替補」
+    # 的唯一依據——`no_feasible_route` 在這條路徑上永遠是 False，表達不出這件事。
+    assert result.all_alternatives_saturated is True
+    assert "無可替補" in (result.selection_rule or ""), (
+        "選線理由必須說出結論是「找不到，只好指派最不糟的」而不是「找到了」"
+    )
+
+
+def test_normal_route_selection_is_not_flagged_as_saturated(bundle: NormalizedDataBundle):
+    """有未飽和候選時 `all_alternatives_saturated` 必須是 False。
+
+    旗標若在正常情況下也是 True，指揮台會對每一起事件都跳「無路可替補」，
+    警示很快就會被當成雜訊忽略——那比不發還糟。
+    """
+    result = plan_route(_make_acc001(bundle))
+    assert result.all_alternatives_saturated is False
+    assert result.no_feasible_route is False
+
 
 def test_saturated_retention_still_respects_hard_filters(bundle: NormalizedDataBundle):
     """保留飽和候選**不得**放寬容量與相鄰性這兩道硬篩選。

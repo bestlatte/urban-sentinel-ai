@@ -12,7 +12,9 @@ from __future__ import annotations
 
 
 
+import contextlib
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 
 # [2026-08-01] 設定日誌，否則本檔與 `src/*` 的 `logger.info()` **一行都不會出現**。
@@ -189,6 +191,37 @@ _simulation_state = {
     "last_level": None,    # 上一次的等級，用於偵測變化
 }
 
+_decision_in_flight = 0
+"""正在跑的決策週期數。大於 0 時模擬時鐘暫停前進。
+
+[2026-08-02] 沒有這道閘門的話，模擬時間會在決策生成期間跑掉一大段：
+
+    22:10 注入事件 → handle_incident() 開始
+          plan_routes 用 as_of=22:10 → 主線市民大道四段(0.78)
+          C1 建議書生成 ~20 秒（LLM）
+    ← 這 20 秒內 tick loop 照跑，speed=60 → **模擬時間前進 20 分鐘**
+    22:30 decision_result 才寫進 active_incidents
+
+結果是 22:15（市民大道四段剛飽和、仁愛路四段還空著）那一刻沒有任何決策可以
+重規劃——第一次路線更新就這樣消失了，而系統下一次看到路況已經是兩條都飽和。
+使用者看到的「只更新一次、而且新舊路線相同」正是這樣來的。
+
+決策本身是幾百毫秒的確定性運算 + 十幾秒的 LLM 敘述；讓模擬時鐘等它，
+換來的是「事件在哪一分鐘發生，就用那一分鐘的路況決策」這個因果一致性。
+真實時間（非模擬）不受影響——這個計數器只有 tick loop 會讀。
+"""
+
+
+@contextlib.contextmanager
+def _hold_simulation_clock():
+    """決策週期進行中暫停模擬時鐘；離開時恢復（例外也會恢復）。"""
+    global _decision_in_flight
+    _decision_in_flight += 1
+    try:
+        yield
+    finally:
+        _decision_in_flight -= 1
+
 
 @app.on_event("startup")
 async def _start_periodic_rule_monitor():
@@ -210,7 +243,12 @@ async def _simulation_tick_loop() -> None:
         
         if not _simulation_state["enabled"] or not _simulation_state["playing"]:
             continue
-        
+
+        # 決策週期進行中就不推進時鐘——理由見 `_decision_in_flight` 的說明。
+        # 只是「暫停」不是「丟棄」：決策一結束，下一秒就從原本的時間繼續跑。
+        if _decision_in_flight > 0:
+            continue
+
         if not _simulation_state["current_time"]:
             continue
         
@@ -271,9 +309,10 @@ async def _evaluate_and_alert_at_simtime() -> None:
     # 取得該時間點所有路段的飽和度
     from src.rules import get_saturation
     
+    # 等級變化只用來決定「要不要跳飽和預警彈窗」（降級不發、同級不重發）。
+    # 路線有效性監測**不再**依賴它——見下方 _monitor_active_routes 的呼叫說明。
     alerts_to_send = []
-    saturated_segments = []  # 記錄本次新飽和的路段
-    
+
     for segment in bundle.road_network:
         seg_id = segment.segment_id
         sat = get_saturation(bundle, seg_id, sim_time)
@@ -307,8 +346,7 @@ async def _evaluate_and_alert_at_simtime() -> None:
                     "saturation": round(sat, 2),
                     "time": sim_time.strftime('%H:%M'),
                 })
-                saturated_segments.append(seg_id)
-    
+
     # 發送所有路段的預警
     for alert in alerts_to_send:
         await ws_manager.broadcast({
@@ -323,10 +361,30 @@ async def _evaluate_and_alert_at_simtime() -> None:
             },
         })
     
-    # ★ 新增：檢查飽和路段是否為某個活躍事件的推薦路線
-    if saturated_segments:
-        await _check_and_replan_affected_routes(saturated_segments, sim_time)
-    
+    # ★ 路線有效性監測。
+    #
+    # [2026-08-02 修正] 這裡原本是 `if saturated_segments: await _check...(saturated_segments)`
+    # ——只有在**這一分鐘剛好發生等級變化**時才檢查路線。那是邊緣觸發，漏掉兩種情況：
+    #
+    #   1. 建議書還在生成時的飽和事件會被永久丟棄。實測時序：22:10 注入事件，
+    #      C1 建議書要 ~20 秒（LLM），期間模擬時鐘照跑（speed=60 → 20 模擬分鐘）。
+    #      22:15 市民大道四段 0.85 觸發等級變化，但此刻 `decision_result` 仍是 None，
+    #      `_check_and_replan_affected_routes` 直接 `continue`——而等級已經被記成 B，
+    #      這個路段之後再也不會「變化」，那次重規劃就此消失。
+    #
+    #   2. 路況繼續惡化但沒跨過等級門檻同樣不會觸發。22:45 市民大道四段
+    #      0.95→0.98、仁愛路四段 0.85→0.92，兩條都更塞了，等級卻都沒變
+    #      （A 仍是 A、B 仍是 B）→ 整段時間一次都沒再檢查過。
+    #
+    # 兩者合起來的結果是：整場模擬只在 22:30 觸發過一次重規劃，而那一次因為
+    # 路線還停在 22:10 的規劃結果，主次線同時飽和，重規劃又選回同一條路，
+    # 畫面就成了「✗ 原路線: 市民大道四段 ／ ✓ 新路線: 市民大道四段」。
+    #
+    # 改成每個模擬分鐘都檢查（狀態觸發）。重複推播由 orchestrator 的
+    # `last_route_state_signature` 擋掉——比對在算完路線之後、生成建議書之前，
+    # 所以狀況沒變時不會付出 LLM 的成本。
+    await _monitor_active_routes(sim_time, bundle)
+
     # 推播 dashboard.updated.v1
     if alerts_to_send:
         await ws_manager.broadcast({
@@ -335,56 +393,119 @@ async def _evaluate_and_alert_at_simtime() -> None:
         })
 
 
-async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of: datetime) -> None:
-    """檢查飽和路段是否影響到活躍事件的推薦路線，若是則重規劃並推播。
-    
-    這是「路線動態更新」的核心邏輯：當系統偵測到某路段飽和（透過現有的
-    decision.alert.v1 機制），同時檢查這個路段是不是已經被推薦為某個事件
-    的替代路線——如果是，就立即重新規劃並通知前端。
+def _affected_route_type(routes, invalid_reasons: dict) -> str | None:
+    """把失效路段對應回「主線／次線／兩者皆是」。
+
+    以前這個分類是拿「本分鐘剛變飽和的路段」去比對，所以只認得得出**變化的那一刻**。
+    改用 `check_route_validity()` 實際算出來的 `invalid_reasons`，任何時候檢查
+    都能得到正確答案。
     """
+    if routes is None:
+        return None
+    bad = set(invalid_reasons or {})
+    primary_bad = bool(routes.primary and routes.primary.segment_id in bad)
+    secondary_bad = bool(routes.secondary and routes.secondary.segment_id in bad)
+    if primary_bad and secondary_bad:
+        return "both"
+    if primary_bad:
+        return "primary"
+    if secondary_bad:
+        return "secondary"
+    return None
+
+
+async def _broadcast_replan_progress(event_id: str, as_of: datetime, phase: str) -> None:
+    """路線重規劃的進度事件，沿用前端既有的 `decision.task_update.v1` 進度條。
+
+    `eta_seconds` 是實測的建議書生成時間（見 orchestrator 的 `_TASK_ETA_SECONDS`）。
+    這段期間模擬時鐘不會前進，有這條進度使用者才知道系統在忙而不是當掉。
+    """
+    record = orchestrator.get_global_state().active_incidents.get(event_id)
+    payload = {
+        "trace_id": record.trace_id if record else event_id,
+        "dispatch_seq": (record.route_replan_count + 1) if record else 1,
+        "status": "report_started" if phase == "started" else "report_done",
+        "label": "路線重規劃・更新交控建議書" if phase == "started" else "交控建議書已更新",
+        "event_id": event_id,
+        "sim_time": as_of.isoformat(),
+    }
+    if phase == "started":
+        payload["eta_seconds"] = 20
+    try:
+        await ws_manager.broadcast({
+            "message_type": "decision.task_update.v1",
+            "payload": payload,
+        })
+    except Exception:  # noqa: BLE001 - 推播失敗不該影響重規劃本身
+        pass
+
+
+async def _monitor_active_routes(as_of: datetime, bundle) -> None:
+    """逐一檢查所有活躍事件的推薦路線是否仍然有效，失效則重規劃並推播。
+
+    [2026-08-02] 由「等級變化才觸發」改為每個模擬分鐘都檢查（理由見呼叫端的說明）。
+    真正的「要不要重規劃」判斷在 `routing.check_route_validity()`，這裡只負責
+    掃描與推播；重複狀態由 orchestrator 的 `last_route_state_signature` 擋掉。
+    """
+    import asyncio
+
     state = orchestrator.get_global_state()
-    saturated_set = set(saturated_segments)
-    
+
     for event_id, record in list(state.active_incidents.items()):
         if record.decision_result is None or record.decision_result.routes is None:
+            # 建議書還在生成（LLM ~20 秒）或本來就不需要路網規劃。
+            # 前者只是「這一分鐘還不能判斷」，下一分鐘會再檢查一次——**不再是永久丟棄**。
+            if record.decision_result is None:
+                logger.debug(f"[路線監測] {event_id} 決策尚未完成，本分鐘略過，稍後重試")
             continue
-        
-        routes = record.decision_result.routes
-        affected = False
-        affected_route_type = None
-        
-        # 檢查主路線
-        if routes.primary and routes.primary.segment_id in saturated_set:
-            affected = True
-            affected_route_type = "primary"
-            logger.info(f"[路線監測] 事件 {event_id} 的主路線 {routes.primary.segment_id} 已飽和")
-        
-        # 檢查次路線
-        if routes.secondary and routes.secondary.segment_id in saturated_set:
-            affected = True
-            if affected_route_type:
-                affected_route_type = "both"
-            else:
-                affected_route_type = "secondary"
-            logger.info(f"[路線監測] 事件 {event_id} 的次路線 {routes.secondary.segment_id} 已飽和")
-        
-        if not affected:
+
+        old_routes = record.decision_result.routes
+
+        # 先問再做：路線還有效就不必付出重規劃的代價（毫秒級查表）。
+        #
+        # [2026-08-02] 這一步不只是省時間，更是為了讓「時間當一下」有交代。
+        # 重規劃成功時會重新生成建議書（LLM ~20 秒），而本函式是在模擬 tick
+        # 迴圈裡被 await 的——那 20 秒模擬時鐘完全不動，使用者看到的就是畫面
+        # 卡住。先預判、再推一則帶 eta 的進度事件，卡住的那段就有進度條可看，
+        # 而不是無聲無息地停在某一分鐘。
+        needs = await asyncio.to_thread(
+            orchestrator.route_replan_needed, event_id, as_of, bundle
+        )
+        if not needs:
             continue
-        
-        # 觸發重規劃（內含 load_data + plan_routes，同樣不放在 event loop 上）
-        import asyncio
-        result = await asyncio.to_thread(orchestrator.check_and_replan_routes, event_id, as_of)
-        
+
+        await _broadcast_replan_progress(event_id, as_of, "started")
+        try:
+            result = await asyncio.to_thread(
+                orchestrator.check_and_replan_routes, event_id, as_of
+            )
+        finally:
+            await _broadcast_replan_progress(event_id, as_of, "done")
+
         if result and result.replanned:
+            affected_route_type = _affected_route_type(old_routes, result.invalid_reasons)
+            logger.info(
+                f"[路線監測] 事件 {event_id} 路線失效（{affected_route_type}）："
+                f"{result.invalid_reasons}"
+            )
             # 推播 routes.updated.v1 通知前端
             # 包含新的報告內容，讓前端能夠同步更新報告卡片
             new_decision = result.new_decision_result
+            new_routes = new_decision.routes if new_decision else None
             await ws_manager.broadcast({
                 "message_type": "routes.updated.v1",
                 "payload": {
                     "event_id": event_id,
-                    "reason": "ROUTE_SATURATED",
+                    # [2026-08-02] 「重規劃過」不等於「換了路」。候選全數飽和時
+                    # 重規劃會再挑到同一條路，前端若只看 old/new 欄位就會畫出
+                    # 「✗ 原路線: 市民大道四段 ／ ✓ 新路線: 市民大道四段」。
+                    # 這三個旗標讓前端能區分「換路成功」與「已無路可替補」。
+                    "reason": "NO_ALTERNATIVE_AVAILABLE" if result.no_alternative_available else "ROUTE_SATURATED",
                     "affected_route": affected_route_type,
+                    "route_changed": result.route_changed,
+                    "no_alternative_available": result.no_alternative_available,
+                    "no_feasible_route": bool(new_routes and new_routes.no_feasible_route),
+                    "all_alternatives_saturated": bool(new_routes and new_routes.all_alternatives_saturated),
                     "old_primary": result.old_primary,
                     "new_primary": result.new_primary,
                     "old_secondary": result.old_secondary,
@@ -397,7 +518,26 @@ async def _check_and_replan_affected_routes(saturated_segments: list[str], as_of
                     "notifications": new_decision.notifications.model_dump(mode="json") if new_decision and new_decision.notifications else None,
                 },
             })
-            
+
+            # 已無可替補路段時，額外推一則最高等級警報。routes.updated.v1 是
+            # 「路線面板」的更新事件，這一則走的是警報通道——指揮官不會因為
+            # 沒在看路線面板就漏掉「整個周邊路網都滿了」。
+            if result.no_alternative_available:
+                await ws_manager.broadcast({
+                    "message_type": "decision.alert.v1",
+                    "payload": {
+                        "level": "A",
+                        "severity": "Critical",
+                        "event_id": event_id,
+                        "description": (
+                            f"⚠️ 嚴重警告：{event_id} 周邊已無可替補路段"
+                            f"（候選路段全數飽和），請立即啟動人工指揮或區域封閉"
+                        ),
+                        "ete_minutes": new_decision.ete.minutes if new_decision and new_decision.ete else None,
+                        "alert_type": "NO_FEASIBLE_ROUTE",
+                    },
+                })
+
             # 同時推播更新後的完整 decision result
             if result.new_decision_result:
                 await ws_manager.broadcast({
@@ -442,83 +582,19 @@ async def _periodic_rule_monitor() -> None:
             logger.warning(f"背景規則監測失敗: {e}")
 
 
-def _evaluate_rules_at_time(bundle, as_of: datetime):
-    """使用指定時間做規則評估（模擬器專用）"""
-    from src.models import SensingResult, RuleHit, EvidenceRef, TrafficLevel
-    from src.rules import get_saturation, get_roaming_ratio, get_growth_rate
-    
-    rule_hits = []
-    multilingual_required = False
-    
-    # SOP-1：交通擁塞級別（全 15 路段）
-    _CITY_RESPONSE_SEGMENTS = {"RD_TPE_001", "RD_TPE_002"}
-    
-    for segment in bundle.road_network:
-        sat = get_saturation(bundle, segment.segment_id, as_of)
-        if sat is None:
-            continue
-        if sat >= 0.85:
-            hit = RuleHit(
-                clause_id="SOP-1",
-                segment_id=segment.segment_id,
-                evidence=EvidenceRef(
-                    field="saturation_score",
-                    value=sat,
-                    threshold=0.95 if sat >= 0.95 else 0.85,
-                ),
-                is_primary=False,
-                city_response=segment.segment_id in _CITY_RESPONSE_SEGMENTS,
-            )
-            rule_hits.append(hit)
-    
-    # SOP-3：捷運與接駁分流（BS_MRT_BL17）
-    from src.rules import _as_of_crowd
-    bl17_sample = _as_of_crowd(bundle, "BS_MRT_BL17", as_of)
-    if bl17_sample is not None:
-        if bl17_sample.growth_rate > 0.30 or bl17_sample.user_count > 25000:
-            rule_hits.append(RuleHit(
-                clause_id="SOP-3",
-                station_id="BS_MRT_BL17",
-                evidence=EvidenceRef(
-                    field="growth_rate" if bl17_sample.growth_rate > 0.30 else "user_count",
-                    value=bl17_sample.growth_rate if bl17_sample.growth_rate > 0.30 else bl17_sample.user_count,
-                    threshold=0.30 if bl17_sample.growth_rate > 0.30 else 25000,
-                ),
-            ))
-    
-    # SOP-6：多語通報（任一站點 roaming_user_pct >= 0.30）
-    all_station_ids = {c.station_id for c in bundle.crowd}
-    for station_id in all_station_ids:
-        ratio = get_roaming_ratio(bundle, station_id, as_of)
-        if ratio is not None and ratio >= 0.30:
-            multilingual_required = True
-            rule_hits.append(RuleHit(
-                clause_id="SOP-6",
-                station_id=station_id,
-                evidence=EvidenceRef(
-                    field="roaming_user_pct",
-                    value=ratio,
-                    threshold=0.30,
-                ),
-            ))
-    
-    # 計算等級
-    max_level: TrafficLevel = "normal"
-    for hit in rule_hits:
-        if hit.clause_id == "SOP-1":
-            val = hit.evidence.value
-            if isinstance(val, (int, float)):
-                if val >= 0.95:
-                    max_level = "A"
-                elif val >= 0.85 and max_level != "A":
-                    max_level = "B"
-    
-    return SensingResult(
-        traffic_level=max_level,
-        rule_hits=rule_hits,
-        as_of=as_of,
-        multilingual_required=multilingual_required,
-    )
+# [2026-08-02 移除 `_evaluate_rules_at_time()`]
+# ------------------------------------------
+# 這是 `src/rules.py::evaluate_rules()` 的第二份實作：同樣掃 SOP-1/3/6、同樣的
+# 門檻數字、連 `_CITY_RESPONSE_SEGMENTS` 都各自寫了一份。它在 `evaluate_rules()`
+# 還沒有 `as_of` 參數的年代是必要的權宜之計，那個參數 [2026-08-01] 補上之後
+# 它就再也沒有被呼叫過（全 repo 只剩定義本身）。
+#
+# 留著的風險是實質的：兩份規則引擎會漂移，而這一份少了 SOP-2/4/5/7、
+# 少了 SOP-4→SOP-3 連動，等級判定也是自己重算一遍。哪天有人「順手」接回去，
+# 建議書與 Dashboard 就會開始各說各話。
+#
+# 要在指定時刻評估規則請用 `evaluate_rules(bundle, incident, as_of)`。
+
 
 class SafeStaticFiles(StaticFiles):
     """StaticFiles，但畸形路徑回 404 而不是 500。
@@ -708,18 +784,37 @@ async def evaluate_incident(body: dict):
 
     incident = matched[0]
     
-    # ★ 如果有傳入 as_of，覆寫 incident 的 timestamp（用於模擬器模式）
-    # 這樣 handle_incident 內部的 as-of 查詢會用模擬器當前時間
-    if as_of_str:
+    # 決定事件的評估時刻，並覆寫 incident.timestamp
+    # （handle_incident 內部的 as-of 查詢、ETE、recovery_at、風險推演全都以它為準）。
+    #
+    # [2026-08-02 改為後端決定]
+    # ------------------------
+    # 原本只有「前端有送 as_of 才覆寫」。前端送不送取決於 `SimState.enabled`，
+    # 只要那個旗標沒對上（模擬器由另一個分頁啟動、頁面剛重新整理還沒同步狀態、
+    # 或使用者用 API 直接注入），就會落到事件自己的 timestamp 或真實牆上時間，
+    # 於是建議書寫「封閉時刻 14:11、90 分鐘後（15:41）恢復」——那是這台機器的
+    # 現在幾點，跟畫面上的模擬時刻、跟資料集（2026-05-20 17:00~23:15）全都無關。
+    #
+    # 模擬器在跑的時候，「現在」的唯一權威是後端的 `_simulation_state`，
+    # 不是前端送來的欄位。前端的 as_of 降級為模擬器沒在跑時的備援。
+    as_of_time: datetime | None = clock.simulation_time()
+    as_of_source = "simulation"
+    if as_of_time is None and as_of_str:
         try:
             as_of_time = datetime.fromisoformat(as_of_str)
             if as_of_time.tzinfo is None:
                 as_of_time = as_of_time.replace(tzinfo=_TZ_TAIPEI)
-            # 建立一個新的 incident 副本，覆寫 timestamp
-            incident = incident.model_copy(update={"timestamp": as_of_time})
-            logger.info(f"[模擬器模式] 事件 {event_id} 使用模擬時間 {as_of_time.strftime('%H:%M')} 做飽和度查詢")
+            as_of_source = "request"
         except Exception as e:
             logger.warning(f"解析 as_of 時間失敗: {as_of_str}, {e}")
+            as_of_time = None
+
+    if as_of_time is not None:
+        incident = incident.model_copy(update={"timestamp": as_of_time})
+        logger.info(
+            f"[評估時刻] 事件 {event_id} 使用 {as_of_time.strftime('%Y-%m-%d %H:%M')}"
+            f"（來源：{as_of_source}）"
+        )
 
     # 廣播 decision.cycle_start.v1（週期開始，不帶 trace_id — 真正的 trace_id
     # 由 handle_incident 內部產生，避免格式對不上）
@@ -728,7 +823,10 @@ async def evaluate_incident(body: dict):
         "payload": {"triggered_by": [event_id]},
     })
 
-    decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
+    # 決策期間（含 ~20 秒的建議書生成）暫停模擬時鐘，確保路網規劃用的是
+    # 事件實際發生的那一分鐘的路況，而不是生成結束後已經跑掉 20 分鐘的路況。
+    with _hold_simulation_clock():
+        decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
     payload_json = decision_result.model_dump(mode="json")
 
     # 廣播 decision.alert.v1（所有事件注入都發送警報）
@@ -747,13 +845,25 @@ async def evaluate_incident(body: dict):
     })
 
     # ★ 情境3：檢查是否為「無可用替代路線」的嚴重情況
-    if decision_result.routes and decision_result.routes.no_feasible_route:
+    # [2026-08-02] 加上 all_alternatives_saturated：候選全數飽和時 routing 會依
+    # SOP-2 §2a 例外指派最不糟的那條，`no_feasible_route` 因此是 False——但指揮官
+    # 面對的實際狀況一樣是「沒有路可以替補」，這則警報不能因為系統勉強給得出一個
+    # 路段名稱就不發。
+    if decision_result.routes and (
+        decision_result.routes.no_feasible_route
+        or decision_result.routes.all_alternatives_saturated
+    ):
+        _saturated_only = not decision_result.routes.no_feasible_route
         await ws_manager.broadcast({
             "message_type": "decision.alert.v1",
             "payload": {
                 "level": "A",  # 無可用路線視為最高等級
                 "severity": "Critical",
-                "description": f"⚠️ 嚴重警告：{incident.location} 附近已無可用替代路線！",
+                "description": (
+                    f"⚠️ 嚴重警告：{incident.location} 周邊候選路段全數飽和，已無可替補路段！"
+                    if _saturated_only
+                    else f"⚠️ 嚴重警告：{incident.location} 附近已無可用替代路線！"
+                ),
                 "ete_minutes": None,
                 "alert_type": "NO_FEASIBLE_ROUTE",
             },
@@ -833,6 +943,104 @@ async def what_if(body: dict):
         "message_type": message_type,
         "payload": payload,
     })
+
+
+@app.get("/api/notify/line/status")
+async def line_status():
+    """LINE 通報設定好了沒。前端據此決定按鈕要不要 disable、顯示什麼提示。
+
+    刻意**不回傳 token 本身**，只回傳「有沒有設定」與收件模式。
+    """
+    from src import line_notify
+
+    ok, reason = line_notify.is_configured()
+    return {
+        "status": "ok",
+        "configured": ok,
+        "reason": reason,
+        "mode": "push" if os.getenv("LINE_TO_USER_ID", "").strip() else "broadcast",
+    }
+
+
+@app.post("/api/notify/line")
+async def send_line_notification(body: dict):
+    """把某起事件的通報送到 LINE。
+
+    body = {"event_id": str, "lang": "zh"|"en"|"ja"|"ko", "force": bool}
+
+    送出的是 **C4 多語通報**（本來就是為了發給民眾的簡訊而生成的），
+    不是交控建議書全文——後者好幾百字，在手機上是一整片牆。
+
+    對外發送是不可逆的動作，所以只有使用者按下按鈕才會走到這裡；
+    決策週期本身不會自動發送（見 README「LINE 通報設定」的說明）。
+    """
+    import asyncio
+
+    from src import line_notify
+
+    event_id = (body or {}).get("event_id", "")
+    lang = (body or {}).get("lang", "zh")
+    force = bool((body or {}).get("force", False))
+
+    if not event_id:
+        return JSONResponse(status_code=200, content={
+            "status": "error",
+            "errors": [{"code": "VALIDATION_ERROR", "message": "event_id 為必填"}],
+        })
+
+    state = orchestrator.get_global_state()
+    record = state.active_incidents.get(event_id) or state.resolved_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return JSONResponse(status_code=200, content={
+            "status": "error",
+            "errors": [{"code": "DATA_NOT_FOUND", "message": f"找不到事件 {event_id} 的決策結果"}],
+        })
+
+    decision = record.decision_result
+    text = line_notify.build_incident_message(
+        incident=record.incident,
+        notification=decision.notifications,
+        ete=decision.ete,
+        routes=decision.routes,
+        lang=lang,
+    )
+
+    # 外部 HTTP 呼叫丟到工作執行緒，別佔住 event loop——模擬時鐘與 WebSocket
+    # 推播跟它共用同一個 loop（這個教訓在 handle_incident 上學過一次了）。
+    result = await asyncio.to_thread(line_notify.send_text, text, force=force)
+
+    return JSONResponse(content={
+        "status": "ok" if result.ok else "error",
+        "payload": {
+            "ok": result.ok,
+            "mode": result.mode,
+            "detail": result.detail,
+            "sent_text": result.sent_text,
+            "sent_at": result.sent_at,
+            "diagnostics": result.diagnostics,
+        },
+    })
+
+
+@app.post("/api/chat/assumptions/drop")
+async def drop_chat_assumption(body: dict):
+    """移除單一假設條件（對話框的假設 chip 按 ×）。
+
+    [2026-08-02] 比「整段對話重來」精細：使用者常常只是想拿掉其中一個假設繼續問，
+    不需要連前面問過的東西一起丟。回傳剩下的假設讓前端重畫 chips。
+    """
+    session_id = body.get("session_id", "")
+    key = body.get("key", "")
+    if not session_id or not key:
+        return JSONResponse(status_code=200, content={
+            "status": "error",
+            "errors": [{"code": "VALIDATION_ERROR", "message": "session_id 與 key 為必填"}],
+        })
+
+    from src.session.session_manager import drop_assumption
+
+    remaining = drop_assumption(session_id, key)
+    return JSONResponse(content={"status": "ok", "active_assumptions": remaining})
 
 
 @app.get("/api/health")
@@ -1580,8 +1788,9 @@ async def generate_incident():
         "payload": {"triggered_by": [event_id]},
     })
 
-    # 執行決策流程
-    decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
+    # 執行決策流程（同上：決策期間暫停模擬時鐘）
+    with _hold_simulation_clock():
+        decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
     payload_json = decision_result.model_dump(mode="json")
 
     # 廣播警報
@@ -1596,13 +1805,23 @@ async def generate_incident():
     })
 
     # ★ 情境3：檢查是否為「無可用替代路線」的嚴重情況
-    if decision_result.routes and decision_result.routes.no_feasible_route:
+    # 同上：候選全數飽和（all_alternatives_saturated）與完全找不到候選
+    # （no_feasible_route）對指揮官是同一件事——沒有路可以替補。
+    if decision_result.routes and (
+        decision_result.routes.no_feasible_route
+        or decision_result.routes.all_alternatives_saturated
+    ):
+        _saturated_only = not decision_result.routes.no_feasible_route
         await ws_manager.broadcast({
             "message_type": "decision.alert.v1",
             "payload": {
                 "level": "A",
                 "severity": "Critical",
-                "description": f"⚠️ 嚴重警告：{incident.location} 附近已無可用替代路線！",
+                "description": (
+                    f"⚠️ 嚴重警告：{incident.location} 周邊候選路段全數飽和，已無可替補路段！"
+                    if _saturated_only
+                    else f"⚠️ 嚴重警告：{incident.location} 附近已無可用替代路線！"
+                ),
                 "ete_minutes": None,
                 "alert_type": "NO_FEASIBLE_ROUTE",
             },

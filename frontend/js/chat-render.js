@@ -34,8 +34,61 @@ const _CARDLESS_INTENTS = new Set([
  *  後端 `orchestrator._STRUCTURED_INTENTS` 是同一條線的另一側。 */
 const _ATTACHMENTLESS_INTENTS = new Set(["chitchat", "trace_answer", "error"]);
 
+/**
+ * 把先前的 AI 泡泡標成「已過時」。
+ *
+ * [2026-08-02] 在一個路況每十五分鐘就會翻盤的系統裡，往上捲看到的舊回答
+ * 是有害的：它講的主線可能已經換過兩次。標上它依據的時刻，使用者一眼就知道
+ * 那段話屬於哪個時間點的世界，不會拿它當現況用。
+ *
+ * 只標**比最新回答更早**的泡泡；時刻相同代表世界沒動過，不必打擾。
+ */
+function markStaleBubbles(latestAsOf) {
+  if (!latestAsOf) return;
+  const container = document.getElementById("chat-messages");
+  if (!container) return;
+
+  container.querySelectorAll(".msg-ai[data-as-of]").forEach(el => {
+    const asOf = el.getAttribute("data-as-of");
+    if (!asOf || asOf >= latestAsOf || el.querySelector(".msg-stale")) return;
+    const bubble = el.querySelector(".msg-bubble");
+    if (!bubble) return;
+    bubble.insertAdjacentHTML(
+      "beforebegin",
+      `<div class="msg-stale">此回答依據 ${escapeHtml(_hhmm(asOf))} 的路況・情況已更新</div>`
+    );
+  });
+}
+
+function _hhmm(iso) {
+  const d = parseISOTime ? parseISOTime(iso) : new Date(iso);
+  if (!d || isNaN(d.getTime())) return String(iso).slice(11, 16);
+  return d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit" });
+}
+
 function renderAIResponse(data) {
-  let html = `<div class="msg msg-ai">`;
+  // `data-as-of` 讓之後的回覆能回頭標記這則已經過時（見 markStaleBubbles）。
+  const asOfAttr = data.context_as_of ? ` data-as-of="${escapeHtml(data.context_as_of)}"` : "";
+  let html = `<div class="msg msg-ai"${asOfAttr}>`;
+
+  // 情況有變：在回答**之前**先講。模型也會在文字裡說一次（advisor.txt 嚴格規則 6），
+  // 但那句話會混在段落裡；這條橫幅是給快速掃視用的。
+  if (data.situation_changed) {
+    html += `<div class="msg-notice msg-notice-change">⚠️ 情況已更新——以下回答依據最新路況，與先前的回覆可能不同</div>`;
+  }
+
+  // 假設被清掉時一定要說。系統替使用者做了一個判斷（「這是新的情境」），
+  // 就必須告訴他做了什麼，並且給他反悔的方法。
+  const dropped = data.dropped_assumptions && Object.keys(data.dropped_assumptions);
+  if (dropped && dropped.length) {
+    const names = dropped
+      .map(k => (typeof _assumptionLabel === "function"
+        ? _assumptionLabel(k, data.dropped_assumptions[k]) : k))
+      .join("、");
+    html += `<div class="msg-notice msg-notice-reset">已清除先前的假設：${escapeHtml(names)}。
+      本次僅計算你這次提到的情境；若要疊加請加上「同時」或「再加上」。</div>`;
+  }
+
   // [2026-08-01] LLM 的回覆本來就是 Markdown，原本用 escapeHtml 直接輸出，
   // 於是 **粗體**、## 標題、| 表格 | 全部以原始字元顯示。renderMarkdown()
   // 內部一樣會先逃逸再套語法，安全性不變。
@@ -76,7 +129,18 @@ function renderAIResponse(data) {
   html += renderSuggestedQuestions(data.suggested_questions);
   html += `<div class="msg-time">${formatTime(nowSimAwareISO())}</div>`;
   html += `</div>`;
+
+  // 先把更早的泡泡標成過時，再插入這一則——順序反過來的話新泡泡也會被自己標記。
+  if (typeof markStaleBubbles === "function") markStaleBubbles(data.context_as_of);
   appendToMessages(html);
+
+  // 假設 chips 跟著每次回覆更新。放在這裡而不是 `sendMessage()`：
+  // 回覆有三條進入路徑（REST 回傳、`whatif.evaluated.v1`、`chat.response.v1`），
+  // 只在其中一條更新，另外兩條進來時 chips 就會停在舊狀態。
+  if (typeof renderAssumptionChips === "function" && data.active_assumptions) {
+    renderAssumptionChips(data.active_assumptions);
+  }
+  if (data.context_as_of) ChatState.lastContextAsOf = data.context_as_of;
 }
 
 function renderDecisionCard(data) {

@@ -128,7 +128,10 @@ _POSITION_LABELS = {
 
 
 def _describe_selection(
-    primary: RouteCandidate | None, secondary: RouteCandidate | None
+    primary: RouteCandidate | None,
+    secondary: RouteCandidate | None,
+    *,
+    all_alternatives_saturated: bool = False,
 ) -> str:
     """用一句話交代主/次線是怎麼挑出來的。
 
@@ -141,6 +144,22 @@ def _describe_selection(
     """
     if primary is None:
         return "所有候選路段均被排除，無可行替代路線。"
+
+    if all_alternatives_saturated:
+        # 這句話跟下面那句的差別不是措辭，是結論相反：一個是「找到了」，
+        # 一個是「找不到，只好指派最不糟的」。用同一句描述兩件事，指揮官
+        # 會把飽和路線當成暢通路線看待。
+        detail = (
+            f"周邊候選路段全數飽和（Saturation ≥ 0.85），**已無可替補的路段**。"
+            f"依 SOP-2 §2a 例外仍指派飽和度最低者 {primary.name}"
+            f"（{primary.saturation_score}）為主線"
+        )
+        if secondary is not None:
+            detail += f"、{secondary.name}（{secondary.saturation_score}）為次線"
+        return (
+            detail + "，並啟動長綠燈時制。此為權宜指派而非可行替代路線，"
+            "請同步評估人工指揮、區域封閉與大眾運輸疏運。"
+        )
 
     rule = (
         "篩選：容量 ≥ 1000 vph、與事故路段直接相鄰、位於事故點上游（SOP-2 §2a）；"
@@ -401,6 +420,7 @@ def plan_route(request: RouteRequest) -> RoutePlan:
 
     primary: RouteCandidate | None = None
     secondary: RouteCandidate | None = None
+    all_alternatives_saturated = False
 
     if eligible_upstream:
         # 主路線從上游候選中選
@@ -467,8 +487,18 @@ def plan_route(request: RouteRequest) -> RoutePlan:
             if len(retained_list) > 1:
                 secondary = retained_list[1]
 
+            # 走到這條分支就代表：**沒有任何未飽和的候選**。指派出去的是最不糟的
+            # 那條，不是可以替補的那條。這個事實必須用一個明確的旗標傳下去，
+            # 光靠 `no_feasible_route`（primary is None）表達不出來——見
+            # `RoutePlan.all_alternatives_saturated` 的說明。
+            all_alternatives_saturated = True
+
             # finding 要列出全部被保留的路段——指揮官必須知道這些路線**本來就滿了**，
             # 指派它們是「沒有更好的選擇」而不是「這條路很順」。
+            #
+            # [2026-08-02] `saturation_score`（單數）也一併寫入：`reporting.py` 的
+            # 保底模板讀的是單數 key，之前印出來是「飽和度 None」。複數 key 保留
+            # 給需要逐段對照的呼叫端（前端地圖、M4B 追問）。
             findings.append(RouteFinding(
                 finding_code="SATURATED_BUT_RETAINED",
                 segment_ids=[c.segment_id for c in retained_list],
@@ -476,6 +506,8 @@ def plan_route(request: RouteRequest) -> RoutePlan:
                     "saturation_scores": {
                         c.segment_id: c.saturation_score for c in retained_list
                     },
+                    "saturation_score": retained_list[0].saturation_score,
+                    "no_unsaturated_alternative": True,
                     "action": "啟動長綠燈時制、綠燈延長 25%，並同步建議改用大眾運輸",
                     "sop_ref": "SOP-2 §2a",
                 },
@@ -484,13 +516,16 @@ def plan_route(request: RouteRequest) -> RoutePlan:
     elapsed = int((time.perf_counter() - start_time) * 1000)
 
     return RoutePlan(
-        selection_rule=_describe_selection(primary, secondary),
+        selection_rule=_describe_selection(
+            primary, secondary, all_alternatives_saturated=all_alternatives_saturated
+        ),
         primary=primary,
         secondary=secondary,
         excluded=excluded,
         findings=findings,
         candidates=all_candidates,
         no_feasible_route=(primary is None),
+        all_alternatives_saturated=all_alternatives_saturated,
         duration_ms=elapsed,
         within_60_second_sla=elapsed <= 60000,
     )

@@ -110,6 +110,9 @@ function renderDecisionReasoning(decision) {
     }
     if (routes.no_feasible_route) {
       body += `<div class="dr-warn">所有候選路段均被排除，無可行替代路線</div>`;
+    } else if (routes.all_alternatives_saturated) {
+      // 有主/次線不代表有路可替補：SOP-2 §2a 例外會指派飽和路線。
+      body += `<div class="dr-warn">目前無路段可以替補：候選全數飽和，上列主/次線為權宜指派，本身仍壅塞</div>`;
     }
 
     steps.push(_drStep(n, "路線篩選", body, "R1-R5 路網重規劃（純確定性，零 LLM）"));
