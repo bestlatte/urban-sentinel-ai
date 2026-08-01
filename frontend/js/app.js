@@ -128,8 +128,11 @@ function onDecisionCompleted(decision) {
   // 記錄到 Activity Log
   _recordDecisionForActivity(decision);
   
-  // 更新 F4 路網圖
-  if (decision.routes) updateMap(decision.routes);
+  // 更新 F4 路網圖（傳入事件發生的路段 ID）
+  if (decision.routes) {
+    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    updateMap(decision.routes, incidentSegmentId);
+  }
   
   // 飽和地圖更新由 decision.alert.v1 負責，不在這裡處理
   
@@ -160,6 +163,14 @@ function toggleIncidentBox(level) {
   const box = document.getElementById(`incident-box-${level}`);
   if (box) {
     box.classList.toggle("collapsed");
+  }
+}
+
+// --- F3 事件注入面板展開/收起 ---
+function toggleInjectPanel() {
+  const panel = document.getElementById("f3-inject");
+  if (panel) {
+    panel.classList.toggle("collapsed");
   }
 }
 
@@ -209,8 +220,9 @@ function addIncidentToLevelBox(decision) {
   const eteMinutes = decision.ete?.minutes;
   const recoveryAt = decision.ete?.recovery_at;
   
+  // ★ 添加 onclick 事件，點擊時切換地圖和報告
   const itemHtml = `
-    <div class="incident-item" data-event-id="${escapeHtml(eventId)}">
+    <div class="incident-item" data-event-id="${escapeHtml(eventId)}" onclick="selectIncidentFromList('${escapeHtml(eventId)}')" style="cursor:pointer;">
       <div class="incident-item-title">${escapeHtml(title)}</div>
       ${location ? `<div class="incident-item-location">${escapeHtml(location)}</div>` : ""}
       ${eteMinutes ? `<div class="incident-item-ete">ETE: <strong>${eteMinutes}</strong> 分鐘${recoveryAt ? ` · 預計 ${escapeHtml(recoveryAt)}` : ""}</div>` : ""}
@@ -221,6 +233,26 @@ function addIncidentToLevelBox(decision) {
   
   // 更新計數和預覽
   updateIncidentCount(level);
+}
+
+// ★ 新函式：點擊事件列表項目時切換地圖和報告
+function selectIncidentFromList(eventId) {
+  console.log(`[selectIncidentFromList] 點擊事件: ${eventId}`);
+  
+  // 切換 report tab
+  if (_allDecisions.has(eventId)) {
+    switchReportTab(eventId);
+  }
+  
+  // 切換 Activity 面板
+  if (_activityByEvent.has(eventId)) {
+    selectActivityEvent(eventId);
+  }
+  
+  // 更新視覺選中狀態
+  document.querySelectorAll(".incident-item").forEach(item => {
+    item.classList.toggle("selected", item.dataset.eventId === eventId);
+  });
 }
 
 function onRulesEvaluated(sensing) {
@@ -342,21 +374,135 @@ function dismissAlert() {
 }
 
 // --- F3 事件注入 ---
-function initF3InjectForm() {
+// 全域變數：儲存從後端載入的事件列表
+let _availableIncidents = [];
+
+async function initF3InjectForm() {
   const form = document.getElementById("incident-inject-form");
-  if (!form) return;
-  const events = [
-    { id: "TPE_2026_ACC_001", label: "路面塌陷（光復南路）" },
-    { id: "TPE_2026_EVT_002", label: "人群推擠（國父紀念館站）" },
-    { id: "TPE_2026_EVT_003", label: "號誌故障（松高路）" },
-  ];
-  form.innerHTML = `
-    <div style="margin-bottom:8px;font-size:0.65rem;color:var(--text-muted);">固定測試事件</div>
-    ${events.map(e => `<button type="button" onclick="injectIncident('${e.id}')">${e.label}</button>`).join("")}
+  if (!form) {
+    console.error("[initF3InjectForm] 找不到 #incident-inject-form");
+    return;
+  }
+
+  console.log("[initF3InjectForm] 開始載入事件列表...");
+  
+  // 顯示載入中狀態
+  form.innerHTML = `<div style="font-size:0.72rem;color:var(--text-muted);padding:8px 0;">載入事件列表中...</div>`;
+
+  // 從後端載入事件列表
+  try {
+    const data = await fetchIncidents();
+    console.log("[initF3InjectForm] API 回應:", data);
+    
+    if (data.status === "ok" && data.incidents) {
+      _availableIncidents = data.incidents;
+      console.log(`[initF3InjectForm] 載入 ${_availableIncidents.length} 筆事件`);
+      renderIncidentButtons(form);
+    } else {
+      console.error("[initF3InjectForm] API 回應錯誤:", data);
+      form.innerHTML = `<div style="font-size:0.72rem;color:var(--level-a);">載入失敗: ${JSON.stringify(data)}</div>`;
+    }
+  } catch (e) {
+    console.error("載入事件列表失敗:", e);
+    // 失敗時顯示預設的三個事件
+    _availableIncidents = [
+      { event_id: "TPE_2026_ACC_001", type: "Road_Collapse_Accident", location: "光復南路", severity: "Critical" },
+      { event_id: "TPE_2026_EVT_002", type: "Crowd_Surge_Injury", location: "國父紀念館站", severity: "High" },
+      { event_id: "TPE_2026_EVT_003", type: "Power_Failure", location: "松高路", severity: "Medium" },
+    ];
+    renderIncidentButtons(form);
+  }
+}
+
+function renderIncidentButtons(form) {
+  if (!form) {
+    console.error("[renderIncidentButtons] form 為 null");
+    return;
+  }
+
+  console.log(`[renderIncidentButtons] 渲染 ${_availableIncidents.length} 筆事件`);
+
+  // 依嚴重度分組
+  const critical = _availableIncidents.filter(e => e.severity === "Critical");
+  const high = _availableIncidents.filter(e => e.severity === "High");
+  const medium = _availableIncidents.filter(e => e.severity === "Medium");
+  const low = _availableIncidents.filter(e => e.severity === "Low");
+
+  console.log(`[renderIncidentButtons] Critical: ${critical.length}, High: ${high.length}, Medium: ${medium.length}, Low: ${low.length}`);
+
+  // 產生事件按鈕的 HTML
+  function makeButton(e) {
+    const shortType = _getShortType(e.type);
+    const shortLocation = e.location?.length > 12 ? e.location.substring(0, 12) + "…" : (e.location || "");
+    const isInjected = _injectedEventIds.has(e.event_id);
+    const disabledAttr = isInjected ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : '';
+    const checkMark = isInjected ? ' ✓' : '';
+    return `<button type="button" onclick="injectIncident('${escapeHtml(e.event_id)}')" ${disabledAttr} title="${escapeHtml(e.event_id)}\n${escapeHtml(e.description || '')}">${shortType}（${shortLocation}）${checkMark}</button>`;
+  }
+
+  let html = '';
+
+  // Critical 事件（紅色區塊）
+  if (critical.length > 0) {
+    html += `<div class="inject-group critical">
+      <div class="inject-group-header"><span class="severity-dot critical"></span>Critical (${critical.length})</div>
+      <div class="inject-group-buttons">${critical.map(makeButton).join('')}</div>
+    </div>`;
+  }
+
+  // High 事件（橘色區塊）
+  if (high.length > 0) {
+    html += `<div class="inject-group high">
+      <div class="inject-group-header"><span class="severity-dot high"></span>High (${high.length})</div>
+      <div class="inject-group-buttons">${high.map(makeButton).join('')}</div>
+    </div>`;
+  }
+
+  // Medium 事件（黃色區塊）
+  if (medium.length > 0) {
+    html += `<div class="inject-group medium">
+      <div class="inject-group-header"><span class="severity-dot medium"></span>Medium (${medium.length})</div>
+      <div class="inject-group-buttons">${medium.map(makeButton).join('')}</div>
+    </div>`;
+  }
+
+  // Low 事件（綠色區塊）
+  if (low.length > 0) {
+    html += `<div class="inject-group low">
+      <div class="inject-group-header"><span class="severity-dot low"></span>Low (${low.length})</div>
+      <div class="inject-group-buttons">${low.map(makeButton).join('')}</div>
+    </div>`;
+  }
+
+  // 模擬事件區塊
+  html += `
     <div style="margin:12px 0 8px;padding-top:10px;border-top:1px solid var(--border);font-size:0.65rem;color:var(--text-muted);">模擬事件</div>
     <button type="button" onclick="generateRandomIncident()" style="background:linear-gradient(135deg, hsl(200,70%,40%), hsl(260,70%,50%));color:white;border:none;">🎲 模擬隨機事件</button>
-    <button type="button" onclick="resetSystem()" style="margin-top:4px;background:transparent;color:var(--text-muted);border-color:var(--border);">🔄 重設系統</button>
+    <button type="button" onclick="reloadIncidentList()" style="margin-top:4px;background:transparent;color:var(--text-muted);border-color:var(--border);">🔄 重新載入事件列表</button>
   `;
+
+  form.innerHTML = html;
+}
+
+// 重新載入事件列表
+async function reloadIncidentList() {
+  _injectedEventIds.clear();  // 清除已注入標記
+  await initF3InjectForm();
+}
+
+// 將事件類型轉換為簡短顯示名稱
+function _getShortType(type) {
+  const typeMap = {
+    "Road_Collapse_Accident": "路面塌陷",
+    "Traffic_Accident": "車禍",
+    "Crowd_Surge_Injury": "人群推擠",
+    "Power_Failure": "號誌故障",
+    "Vehicle_Fire": "車輛起火",
+    "Large_Event_Dispersal": "大型散場",
+    "Water_Main_Break": "水管破裂",
+    "Debris_On_Road": "路面障礙",
+  };
+  return typeMap[type] || type;
 }
 
 // 生成隨機事件
@@ -479,10 +625,22 @@ async function injectIncident(eventId) {
       btn.textContent = btn.textContent + " ✓";
     }
     
+    console.log(`[injectIncident] 開始注入事件: ${eventId}`);
     const data = await fetchEvaluateIncident(eventId);
+    console.log(`[injectIncident] API 回應:`, data);
+    
     if (data.status === "ok" && data.payload) {
       const decision = data.payload;
+      console.log(`[injectIncident] decision.routes:`, decision.routes);
+      
       onDecisionCompleted(decision);
+      
+      // ★ 確保地圖立即更新（傳入事件發生的路段 ID）
+      if (decision.routes) {
+        const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+        console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}`);
+        updateMap(decision.routes, incidentSegmentId);
+      }
       // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
     }
   } catch (e) {
@@ -665,6 +823,13 @@ function switchReportTab(eventId) {
   const decision = _allDecisions.get(eventId);
   _renderReportTabs();
   _renderReportContent(decision);
+  
+  // ★ 同步更新 F4 路網圖，顯示該事件的疏散路線和事件發生點
+  if (decision.routes) {
+    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    console.log(`[switchReportTab] 切換地圖到事件 ${eventId}, 事件路段: ${incidentSegmentId}`);
+    updateMap(decision.routes, incidentSegmentId);
+  }
 }
 
 // --- 報告放大彈窗 ---

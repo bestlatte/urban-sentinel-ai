@@ -40,25 +40,83 @@ def _is_directly_intersecting(
     return candidate_name in affected_segment_intersections
 
 
-def _determine_position(
-    candidate_name: str, affected_segment_intersections: list[str]
-) -> str:
-    """依據 intersections 順序（上游→下游）判定候選是 upstream/downstream/unknown。
+def _parse_flow_direction(flow_direction: str) -> tuple[str, str | None]:
+    """解析 flow_direction 欄位，回傳 (基本方向, 受影響車流方向)。
+    
+    範例：
+    - "東西向" → ("東西向", None)
+    - "南北向" → ("南北向", None)
+    - "南北向 (事故影響南下車流)" → ("南北向", "南下")
+    - "東西向 (事故影響東行車流)" → ("東西向", "東行")
+    """
+    if "(" in flow_direction:
+        base = flow_direction.split("(")[0].strip()
+        detail = flow_direction.split("(")[1].replace(")", "").strip()
+        # 提取方向關鍵字
+        if "南下" in detail:
+            affected_flow = "南下"
+        elif "北上" in detail:
+            affected_flow = "北上"
+        elif "東行" in detail:
+            affected_flow = "東行"
+        elif "西行" in detail:
+            affected_flow = "西行"
+        else:
+            affected_flow = None
+        return base, affected_flow
+    return flow_direction, None
 
-    intersections[0] 為最上游端，intersections[-1] 為最下游端。
-    候選路段名稱出現的位置若在前半段視為 upstream，後半段視為 downstream。
-    只有一個交會點時視為 upstream。
+
+def _determine_position(
+    candidate_name: str,
+    affected_segment_intersections: list[str],
+    flow_direction: str | None = None,
+) -> str:
+    """依據 intersections 順序與車流方向判定候選是 upstream/downstream/unknown。
+
+    邏輯：
+    1. 若候選路段不在 intersections 中 → "unknown"
+    2. 若有明確的 flow_direction（如「南下」「北上」）：
+       - 南北向道路：intersections[0] 是北端，intersections[-1] 是南端
+         - 南下車流：北端=上游，南端=下游
+         - 北上車流：南端=上游，北端=下游
+       - 東西向道路：intersections[0] 是西端，intersections[-1] 是東端
+         - 東行車流：西端=上游，東端=下游
+         - 西行車流：東端=上游，西端=下游
+    3. 若無明確方向，預設 intersections[0] = 上游（向後相容）
     """
     if candidate_name not in affected_segment_intersections:
         return "unknown"
+
     idx = affected_segment_intersections.index(candidate_name)
     total = len(affected_segment_intersections)
+
     if total <= 1:
         return "upstream"
-    # 前半（含中間）= upstream，後半 = downstream
-    if idx < total / 2:
-        return "upstream"
-    return "downstream"
+
+    # 解析車流方向
+    base_direction, affected_flow = _parse_flow_direction(flow_direction or "")
+
+    # 計算相對位置（0.0 = 最前端，1.0 = 最後端）
+    relative_pos = idx / (total - 1) if total > 1 else 0
+
+    # 判斷是否需要反轉上下游
+    # 預設：intersections[0] = 上游
+    # 反轉情況：北上、西行（車流從後端往前端走）
+    reverse = affected_flow in ("北上", "西行")
+
+    if reverse:
+        # 反轉：後端變上游
+        if relative_pos > 0.5:
+            return "upstream"
+        else:
+            return "downstream"
+    else:
+        # 正常：前端是上游
+        if relative_pos < 0.5:
+            return "upstream"
+        else:
+            return "downstream"
 
 
 def plan_route(request: RouteRequest) -> RoutePlan:
@@ -143,18 +201,28 @@ def plan_route(request: RouteRequest) -> RoutePlan:
             continue
 
         # R3 step 4: 與事故道路直接相交
-        if not _is_directly_intersecting(seg.name, affected_seg.intersections):
-            candidate = RouteCandidate(
-                segment_id=alt_id, name=seg.name, eligible=False,
-                reason_code="NOT_DIRECTLY_INTERSECTING", saturation_score=sat,
-                capacity_vph=seg.capacity_vph, snapshot_at=snapshot_at,
-            )
-            all_candidates.append(candidate)
-            excluded.append(candidate)
-            continue
+        # [2026-08-01 修正] 原本檢查候選路段的 name 是否在事故路段的 intersections 裡，
+        # 但 intersections 記錄的是「交叉路口名稱」（如「忠孝東路四段」），不是「替代路段名稱」。
+        # 例如：RD_TPE_003（基隆路一段）的 alternatives 包含 RD_TPE_006（敦化南路一段），
+        # 但 RD_TPE_003 的 intersections 是 ['忠孝東路四段', '松高路', '信義路五段']，
+        # 「敦化南路一段」不在裡面，導致所有替代路線都被錯誤排除。
+        #
+        # 正確邏輯：alternatives 清單本身就是路網設計者預先驗證過的合理替代路線，
+        # 不需要再用 intersections 做二次驗證。移除此檢查，改為記錄「是否直接相交」
+        # 作為輔助資訊（影響上下游判定），但不作為排除條件。
+        is_directly_intersecting = _is_directly_intersecting(seg.name, affected_seg.intersections)
 
-        # R3 step 5: 上下游判定
-        position = _determine_position(seg.name, affected_seg.intersections)
+        # R3 step 5: 上下游判定（根據車流方向）
+        # [2026-08-01 修正] 現在會讀取 flow_direction 欄位判斷車流方向
+        # 若候選路段在 intersections 裡，依位置 + 車流方向判定；否則視為 parallel
+        if is_directly_intersecting:
+            position = _determine_position(
+                seg.name,
+                affected_seg.intersections,
+                affected_seg.flow_direction,  # 傳入車流方向
+            )
+        else:
+            position = "parallel"  # 平行替代路線，優先級介於 upstream 和 downstream 之間
 
         # R3 step 6: 流向符合（南北向事故 → 東西向替代較適合分流，反之亦然）
         # 但 spec 的黃金值顯示流向不匹配不是硬排除在這個資料集中
@@ -183,10 +251,10 @@ def plan_route(request: RouteRequest) -> RoutePlan:
                 capacity_vph=seg.capacity_vph, snapshot_at=snapshot_at,
             )
             all_candidates.append(candidate)
-            # 暫存，R4 會決定是否保留
+            # 暫存，R4 會決定是否保留（parallel 視為 upstream 優先級）
             if position == "downstream":
                 downstream_eligible.append(candidate)
-            else:
+            else:  # upstream 或 parallel
                 upstream_eligible.append(candidate)
             excluded.append(candidate)
             continue
@@ -199,9 +267,10 @@ def plan_route(request: RouteRequest) -> RoutePlan:
         )
         all_candidates.append(candidate)
 
+        # parallel（平行替代路線）視為與 upstream 同優先級
         if position == "downstream":
             downstream_eligible.append(candidate)
-        else:
+        else:  # upstream 或 parallel
             upstream_eligible.append(candidate)
 
     # R4：主次排序

@@ -324,16 +324,36 @@ M1-M4。這是屬於「架構圖上畫了依賴注入，程式碼裡沒接線」
 def classify_incident(incident: Incident) -> dict:
     """回傳 {primary_sop, requires_rerouting, affected_source}。
 
-    對照表（m5-api-orchestrator-dashboard/design.md）：
-        Road_Collapse_Accident → SOP-2 → requires_rerouting=True
-        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False
-        Power_Failure          → SOP-5 → requires_rerouting=False
+    對照表（m5-api-orchestrator-dashboard/design.md + 擴充）：
+        Road_Collapse_Accident → SOP-2 → requires_rerouting=True   # 路面塌陷
+        Traffic_Accident       → SOP-2 → requires_rerouting=True   # 一般車禍
+        Vehicle_Fire           → SOP-2 → requires_rerouting=True   # 車輛火警
+        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False  # 人群推擠
+        Large_Event_Dispersal  → SOP-4 → requires_rerouting=False  # 大型活動散場
+        Power_Failure          → SOP-5 → requires_rerouting=False  # 號誌故障
+        Water_Main_Break       → SOP-2 → requires_rerouting=False  # 水管破裂（減速即可）
+        Debris_On_Road         → SOP-2 → requires_rerouting=False  # 路面掉落物（清除快）
         其他                    → None  → requires_rerouting=False
+
+    requires_rerouting 判定邏輯：
+    - True：事件會導致道路完全或大部分封閉，車流需要改道
+    - False：事件影響局部或短暫，減速/管制即可，不需大規模改道
+    
+    [2026-07-28擴充] 額外考慮 status + severity 組合：
+    - status=Closed + severity=Critical/High → 強制 requires_rerouting=True
     """
     type_map = {
+        # 需要路網重規劃的嚴重事件
         "Road_Collapse_Accident": ("SOP-2", True),
+        "Traffic_Accident": ("SOP-2", True),
+        "Vehicle_Fire": ("SOP-2", True),
+        # 人流相關（不需道路改道）
         "Crowd_Surge_Injury": ("SOP-3", False),
+        "Large_Event_Dispersal": ("SOP-4", False),
+        # 設備/環境問題
         "Power_Failure": ("SOP-5", False),
+        "Water_Main_Break": ("SOP-2", False),
+        "Debris_On_Road": ("SOP-2", False),
     }
 
     primary_sop, requires_rerouting = type_map.get(incident.type, (None, False))

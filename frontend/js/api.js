@@ -36,6 +36,11 @@ async function fetchHealth() {
   return resp.json();
 }
 
+async function fetchIncidents() {
+  const resp = await fetch("/api/incidents");
+  return resp.json();
+}
+
 
 // ========== Simulation API ==========
 

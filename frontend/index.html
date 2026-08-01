@@ -111,8 +111,16 @@
 
         <!-- Event Injection -->
         <section class="section card" id="f3-inject">
-          <div class="section-header">Event Injection</div>
-          <form id="incident-inject-form"></form>
+          <div class="section-header section-header-toggle" onclick="toggleInjectPanel()">
+            <span>Event Injection</span>
+            <span class="inject-toggle-icon" id="inject-toggle-icon">▼</span>
+          </div>
+          <div class="inject-panel-content" id="inject-panel-content">
+            <form id="incident-inject-form"></form>
+            <div class="inject-system-actions" id="inject-system-actions">
+              <button type="button" onclick="resetSystem()" class="reset-system-btn">🔄 重設系統</button>
+            </div>
+          </div>
         </section>
 
         <!-- Active Incidents by Level -->

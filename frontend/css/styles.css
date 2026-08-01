@@ -502,6 +502,18 @@ body {
   gap: 2px;
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
+  transition: background 0.15s;
+}
+
+.incident-item:hover {
+  background: var(--bg-elevated);
+}
+
+.incident-item.selected {
+  background: var(--bg-elevated);
+  border-left: 2px solid var(--accent);
+  padding-left: 8px;
+  margin-left: -8px;
 }
 
 .incident-item:last-child {
@@ -1392,4 +1404,158 @@ body {
   font-size: 0.65rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+
+/* ===== F3 事件注入面板 ===== */
+#f3-inject {
+  max-height: none;
+  overflow: visible;
+}
+
+#f3-inject.collapsed .inject-panel-content {
+  display: none;
+}
+
+#f3-inject.collapsed .inject-toggle-icon {
+  transform: rotate(-90deg);
+}
+
+.section-header-toggle {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+  transition: background 0.15s;
+  padding: 8px 0;
+  margin: -8px 0 14px 0;
+}
+
+.section-header-toggle:hover {
+  opacity: 0.8;
+}
+
+.inject-toggle-icon {
+  font-size: 0.6rem;
+  transition: transform 0.2s;
+  color: var(--text-muted);
+}
+
+.inject-panel-content {
+  display: block;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+#f3-inject #incident-inject-form {
+  display: block;
+}
+
+/* 系統操作按鈕區 */
+.inject-system-actions {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.reset-system-btn {
+  width: 100%;
+  padding: 10px 14px;
+  background: linear-gradient(135deg, hsl(0, 60%, 30%), hsl(0, 60%, 25%));
+  color: hsl(0, 70%, 75%);
+  border: 1px solid hsl(0, 50%, 35%);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-family: var(--font);
+  transition: all 0.15s;
+}
+
+.reset-system-btn:hover {
+  background: linear-gradient(135deg, hsl(0, 65%, 35%), hsl(0, 65%, 30%));
+  color: hsl(0, 80%, 85%);
+  border-color: hsl(0, 60%, 45%);
+}
+
+.inject-group {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.inject-group.critical { border-left: 3px solid var(--level-a); }
+.inject-group.high { border-left: 3px solid var(--level-b); }
+.inject-group.medium { border-left: 3px solid hsl(48, 96%, 53%); }
+.inject-group.low { border-left: 3px solid var(--success); }
+
+.inject-group-header {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.severity-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.severity-dot.critical { background: var(--level-a); }
+.severity-dot.high { background: var(--level-b); }
+.severity-dot.medium { background: hsl(48, 96%, 53%); }
+.severity-dot.low { background: var(--success); }
+
+.inject-group-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inject-group-buttons button {
+  padding: 6px 10px;
+  font-size: 0.68rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.inject-group-buttons button:hover:not(:disabled) {
+  border-color: var(--border-hover);
+  background: var(--bg-elevated);
+  color: var(--text);
+}
+
+.inject-group-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.inject-group.critical .inject-group-buttons button:hover:not(:disabled) {
+  border-color: hsl(0, 50%, 35%);
+  color: var(--level-a);
+}
+
+.inject-group.high .inject-group-buttons button:hover:not(:disabled) {
+  border-color: hsl(25, 50%, 35%);
+  color: var(--level-b);
+}
+
+.inject-group.medium .inject-group-buttons button:hover:not(:disabled) {
+  border-color: hsl(48, 50%, 35%);
+  color: hsl(48, 96%, 53%);
+}
+
+.inject-group.low .inject-group-buttons button:hover:not(:disabled) {
+  border-color: hsl(142, 50%, 30%);
+  color: var(--success);
 }

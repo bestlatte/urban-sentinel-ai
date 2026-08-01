@@ -650,6 +650,25 @@ async def health():
     return {"status": "ok", "use_bedrock": use_bedrock, "gateway_mode": gateway_mode}
 
 
+@app.get("/api/incidents")
+async def list_incidents():
+    """取得所有可用事件列表（供前端事件注入面板動態顯示）。"""
+    bundle = orchestrator.GATEWAY.load_data()
+    incidents = []
+    for inc in bundle.incidents:
+        incidents.append({
+            "event_id": inc.event_id,
+            "type": inc.type,
+            "location": inc.location,
+            "severity": inc.severity.value,
+            "status": inc.status,
+            "description": inc.description,
+            "affected_segment": inc.affected_segment,
+            "timestamp": inc.timestamp.isoformat() if inc.timestamp else None,
+        })
+    return {"status": "ok", "incidents": incidents}
+
+
 @app.post("/api/reset")
 async def reset_state():
     """重設後端狀態（清空 active_incidents），供開發測試用。"""
