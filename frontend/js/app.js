@@ -513,8 +513,10 @@ function showAlertModal(payload) {
   let roadName, description, extraInfo;
   
   if (isIncidentAlert) {
-    // 事件注入的彈窗
-    roadName = "事件通報";
+    // 事件注入的彈窗：顯示中文事件名稱
+    const typeName = _getShortType(payload.type || "");
+    const location = payload.location || "";
+    roadName = location ? `${typeName}（${location}）` : (typeName || "事件通報");
     description = payload.description || "決策完成";
     extraInfo = payload.ete_minutes ? `預計恢復時間：${payload.ete_minutes} 分鐘` : "";
   } else {
