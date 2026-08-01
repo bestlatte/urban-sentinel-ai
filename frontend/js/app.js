@@ -108,6 +108,11 @@ function switchPage(pageName) {
   if (pageName === "reports") {
     renderReportsEventList();
   }
+  
+  // 切換到 Incident Monitor 頁面時，渲染監控卡片
+  if (pageName === "incidents") {
+    renderIncidentMonitor();
+  }
 }
 
 // --- F1 KPI ---
@@ -228,6 +233,9 @@ function onDecisionCompleted(decision) {
   
   // 更新 Reports 頁面列表（如果在該頁面）
   _updateReportsOnNewDecision();
+  
+  // 更新 Incident Monitor 頁面卡片
+  renderIncidentMonitor();
 }
 
 // ★ 判斷兩個 routes 是否有變化（用於識別 cascade replan 更新）
@@ -277,6 +285,9 @@ function _handleReplanDecisionUpdate(decision, eventId) {
   
   // 記錄到 Activity Log
   _appendReplanUpdateToActivity(eventId, decision);
+  
+  // 更新 Incident Monitor 頁面卡片
+  renderIncidentMonitor();
 }
 
 // ★ 將 cascade replan 記錄到 Activity Log
@@ -2524,4 +2535,144 @@ function _updateReportsOnNewDecision() {
   if (reportsPage && !reportsPage.hidden) {
     renderReportsEventList();
   }
+}
+
+
+// ========== Incident Monitor 頁面邏輯 ==========
+
+/** 已解除事件 ID 集合（前端狀態，不影響後端） */
+const _clearedIncidents = new Set();
+
+/** 篩選器：'all' | 'active' | 'cleared' */
+let _incidentFilter = "all";
+
+/**
+ * 設定篩選器並重繪
+ * @param {'all' | 'active' | 'cleared'} filter
+ */
+function setIncidentFilter(filter) {
+  _incidentFilter = filter;
+  document.querySelectorAll(".incidents-filter-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.filter === filter);
+  });
+  renderIncidentMonitor();
+}
+
+/**
+ * 渲染 Incident Monitor 卡片列表（Task 2 會填入完整邏輯）
+ */
+function renderIncidentMonitor() {
+  const grid = document.getElementById("incidents-grid");
+  if (!grid) return;
+
+  // 統計用
+  let totalCount = 0;
+  let activeCount = 0;
+  let clearedCount = 0;
+
+  // 篩選並收集要顯示的 entries
+  const entries = [];
+  for (const [eventId, decision] of _allDecisions) {
+    totalCount++;
+    const isCleared = _clearedIncidents.has(eventId);
+    if (isCleared) clearedCount++;
+    else activeCount++;
+
+    if (_incidentFilter === "active" && isCleared) continue;
+    if (_incidentFilter === "cleared" && !isCleared) continue;
+    entries.push({ eventId, decision, isCleared });
+  }
+
+  // 更新篩選 tab 計數
+  const countAll = document.getElementById("filter-count-all");
+  const countActive = document.getElementById("filter-count-active");
+  const countCleared = document.getElementById("filter-count-cleared");
+  if (countAll) countAll.textContent = totalCount;
+  if (countActive) countActive.textContent = activeCount;
+  if (countCleared) countCleared.textContent = clearedCount;
+
+  if (entries.length === 0) {
+    grid.innerHTML = '<div class="incidents-empty">尚無事件</div>';
+    return;
+  }
+
+  // 渲染卡片（Task 2 會完善樣式）
+  let html = "";
+  for (const { eventId, decision, isCleared } of entries) {
+    html += _renderIncidentCard(eventId, decision, isCleared);
+  }
+  grid.innerHTML = html;
+}
+
+/**
+ * 產生單張事件卡片 HTML（Task 2 會補齊欄位與樣式）
+ */
+function _renderIncidentCard(eventId, decision, isCleared) {
+  const incident = decision.incident || {};
+  const level = decision.level || "";
+  const levelClass = level ? `level-${level.toLowerCase()}` : "";
+  const clearedClass = isCleared ? "cleared" : "";
+  const statusLabel = isCleared ? "已解除" : "進行中";
+  const toggleBtnText = isCleared ? "復原" : "解除事件";
+
+  const description = incident.description || incident.type || eventId;
+  const location = incident.location || "—";
+  const eteMinutes = decision.ete?.minutes ?? "—";
+  const recoveryAt = decision.ete?.recovery_at || "—";
+  const primaryRoute = decision.routes?.primary?.segment_id || "—";
+  const primaryName = decision.routes?.primary?.name || "";
+  const secondaryRoute = decision.routes?.secondary?.segment_id || "—";
+  const secondaryName = decision.routes?.secondary?.name || "";
+  const timestamp = incident.timestamp || "—";
+
+  return `
+    <div class="incident-card ${levelClass} ${clearedClass}" data-event-id="${escapeHtml(eventId)}">
+      <div class="incident-card-header">
+        <span class="incident-status-badge ${isCleared ? 'cleared' : 'active'}">${statusLabel}</span>
+        ${level ? `<span class="incident-level-badge ${levelClass}">${level} 級</span>` : ""}
+      </div>
+      <div class="incident-card-title">${escapeHtml(description)}</div>
+      <div class="incident-card-location">${escapeHtml(location)}</div>
+      <div class="incident-card-metrics">
+        <div class="incident-metric"><span class="metric-label">ETE</span><span class="metric-value">${escapeHtml(String(eteMinutes))} 分</span></div>
+        <div class="incident-metric"><span class="metric-label">預估恢復</span><span class="metric-value">${escapeHtml(recoveryAt)}</span></div>
+      </div>
+      <div class="incident-card-routes">
+        <div class="route-item primary"><span class="route-label">主線</span><span class="route-value">${escapeHtml(primaryRoute)}${primaryName ? ` (${escapeHtml(primaryName)})` : ""}</span></div>
+        <div class="route-item secondary"><span class="route-label">次線</span><span class="route-value">${escapeHtml(secondaryRoute)}${secondaryName ? ` (${escapeHtml(secondaryName)})` : ""}</span></div>
+      </div>
+      <div class="incident-card-meta">
+        <span class="meta-event-id">${escapeHtml(eventId)}</span>
+        <span class="meta-timestamp">${escapeHtml(timestamp)}</span>
+      </div>
+      <div class="incident-card-actions">
+        <button class="incident-btn toggle-clear" onclick="toggleClearIncident('${escapeHtml(eventId)}')">${toggleBtnText}</button>
+        <button class="incident-btn delete" onclick="deleteIncident('${escapeHtml(eventId)}')">刪除</button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * 切換事件解除狀態
+ */
+function toggleClearIncident(eventId) {
+  if (_clearedIncidents.has(eventId)) {
+    _clearedIncidents.delete(eventId);
+  } else {
+    _clearedIncidents.add(eventId);
+  }
+  renderIncidentMonitor();
+}
+
+/**
+ * 刪除事件（從 _allDecisions 移除）
+ */
+function deleteIncident(eventId) {
+  if (!confirm(`確定要刪除事件「${eventId}」嗎？此操作無法復原。`)) return;
+  _allDecisions.delete(eventId);
+  _clearedIncidents.delete(eventId);
+  renderIncidentMonitor();
+  // 同步更新 Reports 頁
+  renderReportsEventList();
 }
