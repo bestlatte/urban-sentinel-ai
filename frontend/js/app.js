@@ -10,6 +10,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   connectWebSocket();
   initCharts();
   initMap();
+  initGeoMap();
   initF7Tabs();
   initF3InjectForm();
   initHeaderClock();
@@ -214,6 +215,12 @@ function onDecisionCompleted(decision) {
   if (decision.routes) {
     const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
     updateMap(decision.routes, incidentSegmentId);
+    // 同步更新地理圖
+    if (typeof updateGeoMap === "function") updateGeoMap(decision.routes);
+  }
+  // 標記事故在地理圖上
+  if (decision.incident && typeof markIncidentOnGeoMap === "function") {
+    markIncidentOnGeoMap(decision.incident);
   }
   
   // 飽和地圖更新由 decision.alert.v1 負責，不在這裡處理
@@ -1455,6 +1462,24 @@ function initHeaderClock() {
   }
   tick();
   setInterval(tick, 1000);
+}
+
+// --- Map Tab Switch ---
+function switchMapTab(tab) {
+  const schematic = document.getElementById("f4-map");
+  const geo = document.getElementById("f4-geomap");
+  const buttons = document.querySelectorAll(".map-tab");
+  if (!schematic || !geo) return;
+
+  if (tab === "geographic") {
+    schematic.style.display = "none";
+    geo.style.display = "block";
+    buttons.forEach(b => b.classList.toggle("active", b.textContent.trim() === "Geographic"));
+  } else {
+    schematic.style.display = "block";
+    geo.style.display = "none";
+    buttons.forEach(b => b.classList.toggle("active", b.textContent.trim() === "Schematic"));
+  }
 }
 
 

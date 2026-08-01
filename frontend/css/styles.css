@@ -147,8 +147,14 @@ body {
 
 /* ===== MAP ===== */
 #f4-map {
-  height: 440px;
+  height: 480px;
   position: relative;
+  overflow: hidden;
+}
+
+#f4-container {
+  position: relative;
+  z-index: 1;
   overflow: hidden;
 }
 
@@ -934,9 +940,9 @@ body.side-nav-collapsed .page-content {
 
 /* ===== REPORT EXPANDED (擴大報告區域) ===== */
 #f5-report.report-expanded {
-  max-height: none;
+  max-height: 400px;
+  overflow-y: auto;
   flex: 1;
-  min-height: 400px;
 }
 
 #f5-report.report-expanded #f5-report-content {
