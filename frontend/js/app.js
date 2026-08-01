@@ -27,10 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
     if (data.traffic_samples) {
       updateChartData(data.traffic_samples);
-      // 更新飽和地圖（顯示各路段即時狀態），但不自動加入警報列表
-      if (typeof updateSaturationFromSamples === "function") {
-        updateSaturationFromSamples(data.traffic_samples);
-      }
+      // 初始載入不餵飽和度給地圖，等事件注入或模擬器啟動後才顯示
     }
   } catch (e) {
     console.warn("初始 Dashboard 載入失敗:", e);
@@ -1575,8 +1572,9 @@ function updateSimUI() {
     statusEl?.classList.toggle("playing", SimState.playing);
     statusText.textContent = SimState.playing ? "播放中" : "已暫停";
     
-    startBtn.textContent = "停止模擬";
-    startBtn.classList.add("primary");
+    startBtn.textContent = "⏹";
+    startBtn.title = "停止模擬";
+    startBtn.classList.add("active");
     playBtn.disabled = SimState.playing;
     pauseBtn.disabled = !SimState.playing;
     resetBtn.disabled = false;
@@ -1590,8 +1588,9 @@ function updateSimUI() {
     statusEl?.classList.remove("active", "playing");
     statusText.textContent = "未啟動";
     
-    startBtn.textContent = "啟動模擬";
-    startBtn.classList.remove("primary");
+    startBtn.textContent = "⏺";
+    startBtn.title = "啟動模擬";
+    startBtn.classList.remove("active");
     playBtn.disabled = true;
     pauseBtn.disabled = true;
     resetBtn.disabled = true;

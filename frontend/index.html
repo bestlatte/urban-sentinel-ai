@@ -102,39 +102,9 @@
 
       <!-- Right Column -->
       <div class="col-right">
-        <!-- Time Simulation Control -->
-        <section class="section card" id="simulation-panel">
-          <div class="section-header">Time Simulation</div>
-          <div class="sim-status" id="sim-status">
-            <span class="sim-status-dot"></span>
-            <span class="sim-status-text">未啟動</span>
-          </div>
-          <div class="sim-time-display">
-            <div class="sim-time-label">模擬時間</div>
-            <div class="sim-time-value" id="sim-current-time">--:--</div>
-          </div>
-          <div class="sim-timeline">
-            <input type="range" id="sim-slider" min="0" max="100" value="0" disabled>
-            <div class="sim-timeline-labels">
-              <span id="sim-start-time">17:00</span>
-              <span id="sim-end-time">23:30</span>
-            </div>
-          </div>
-          <div class="sim-controls">
-            <button id="sim-start-btn" class="sim-btn" onclick="simStart()">啟動模擬</button>
-            <button id="sim-play-btn" class="sim-btn" onclick="simPlay()" disabled>▶ 播放</button>
-            <button id="sim-pause-btn" class="sim-btn" onclick="simPause()" disabled>⏸ 暫停</button>
-            <button id="sim-reset-btn" class="sim-btn" onclick="simReset()" disabled>⏪ 重置</button>
-          </div>
-          <div class="sim-speed">
-            <label>播放速度：</label>
-            <select id="sim-speed-select">
-              <option value="30">1秒 = 30秒</option>
-              <option value="60" selected>1秒 = 1分鐘</option>
-              <option value="300">1秒 = 5分鐘</option>
-              <option value="600">1秒 = 10分鐘</option>
-            </select>
-          </div>
+        <!-- Time Simulation Control（原位佔位，內容移至浮動面板） -->
+        <section class="section card" id="simulation-panel-placeholder" style="min-height:60px;display:flex;align-items:center;justify-content:center">
+          <span style="font-size:0.75rem;color:var(--text-muted)">模擬器控制面板已移至左下角</span>
         </section>
 
         <!-- Event Injection -->
@@ -269,6 +239,30 @@
   <script src="/frontend/js/charts.js?v=chart-axis-visible-5"></script>
   <script src="/frontend/js/map.js"></script>
   <script src="/frontend/js/geomap.js"></script>
+  <!-- 浮動模擬器面板（一行式） -->
+  <div id="simulation-panel" class="sim-floating-panel">
+    <div class="sim-floating-row">
+      <span class="sim-floating-label">時間模擬器</span>
+      <button id="sim-start-btn" class="sim-icon-btn" onclick="simStart()" title="停止模擬">⏹</button>
+      <button id="sim-play-btn" class="sim-icon-btn" onclick="simPlay()" disabled title="播放">▶</button>
+      <button id="sim-pause-btn" class="sim-icon-btn" onclick="simPause()" disabled title="暫停">⏸</button>
+      <button id="sim-reset-btn" class="sim-icon-btn" onclick="simReset()" disabled title="重置">⏪</button>
+      <div class="sim-floating-slider">
+        <input type="range" id="sim-slider" min="0" max="100" value="0" disabled>
+      </div>
+      <span class="sim-floating-time" id="sim-current-time">--:--</span>
+      <span class="sim-floating-separator">/</span>
+      <span class="sim-floating-end" id="sim-end-time">23:30</span>
+      <span class="sim-floating-speed-label">1 分鐘/秒</span>
+      <select id="sim-speed-select" style="display:none"><option value="60" selected>60</option></select>
+    </div>
+    <div class="sim-status" id="sim-status" style="display:none">
+      <span class="sim-status-dot"></span>
+      <span class="sim-status-text">未啟動</span>
+    </div>
+    <span id="sim-start-time" style="display:none">17:00</span>
+  </div>
+
   <script src="/frontend/js/chat-app.js"></script>
   <script src="/frontend/js/app.js?v=collapsible-right-sidebar-10"></script>
 </body>
