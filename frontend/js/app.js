@@ -211,7 +211,8 @@ function onDecisionCompleted(decision) {
   
   // 更新 F4 路網圖（傳入事件發生的路段 ID）
   if (decision.routes) {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點（地圖上沒有座標）
+    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
     updateMap(decision.routes, incidentSegmentId);
     // 同步更新地理圖
     if (typeof updateGeoMap === "function") updateGeoMap(decision.routes);
@@ -276,7 +277,8 @@ function _handleReplanDecisionUpdate(decision, eventId) {
   
   // 更新 F4 路網圖
   if (decision.routes) {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
     console.log(`[_handleReplanDecisionUpdate] 更新地圖，事件路段: ${incidentSegmentId}`);
     updateMap(decision.routes, incidentSegmentId);
   }
@@ -869,7 +871,8 @@ async function injectIncident(eventId) {
       
       // ★ 確保地圖立即更新（傳入事件發生的路段 ID）
       if (decision.routes) {
-        const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+        // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+        const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
         console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}`);
         updateMap(decision.routes, incidentSegmentId);
       }
@@ -1108,7 +1111,8 @@ function switchReportTab(eventId) {
   _renderReportContent(decision);
   
   // ★ 同步更新 F4 路網圖
-  const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+  // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+  const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
   console.log(`[switchReportTab] 切換地圖到事件 ${eventId}, 事件路段: ${incidentSegmentId}, routes: ${decision.routes ? '有' : '無'}`);
   
   if (decision.routes) {
@@ -1831,7 +1835,8 @@ function onRoutesUpdated(payload) {
   
   // ★ 更新 F4 路網圖（傳入事件路段 ID）
   if (decision.routes && typeof updateMap === "function") {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
     console.log(`[路線重規劃] 更新地圖，事件路段: ${incidentSegmentId}`);
     updateMap(decision.routes, incidentSegmentId);
   }

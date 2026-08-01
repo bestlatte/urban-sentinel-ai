@@ -92,6 +92,27 @@ def determine_level(rule_hits: list[RuleHit], saturation_score: float | None = N
     return max_level
 
 
+def determine_level_for_segment(
+    bundle: NormalizedDataBundle,
+    segment_id: str,
+    as_of: datetime,
+) -> TrafficLevel:
+    """針對單一路段計算交通等級（事件注入時使用）。
+    
+    與 determine_level() 不同：這個函式只看指定路段的飽和度，
+    不是取全市最高值。用於事件注入時，讓 DecisionResult.level
+    反映該事件影響路段的實際狀況。
+    """
+    sat = get_saturation(bundle, segment_id, as_of)
+    if sat is None:
+        return "normal"
+    if sat >= 0.95:
+        return "A"
+    if sat >= 0.85:
+        return "B"
+    return "normal"
+
+
 def evaluate_rules(bundle: NormalizedDataBundle, incident: Incident | None = None) -> SensingResult:
     """P4：SOP 規則引擎，門檻→條款→動作。彙整 P1-P3 的查詢結果與 P5 的等級判定。
 
