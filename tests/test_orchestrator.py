@@ -403,3 +403,205 @@ def test_replan_keeps_projected_risks(monkeypatch):
     )
     assert result is not None and result.new_decision_result is not None
     assert result.new_decision_result.projected_risks is not None
+
+
+# ---------------------------------------------------------------------------
+# [2026-08-02] 路線重算與建議書重寫分離：不讓 LLM 卡住模擬時鐘
+# ---------------------------------------------------------------------------
+
+
+def test_replan_without_report_skips_the_llm_call(monkeypatch):
+    """`regenerate_report=False` 時**完全不得**呼叫 generate_report。
+
+    這是「模擬時鐘會停 20 秒」的解法：路線重算是毫秒級的確定性運算，
+    建議書重寫才是那 20 秒。tick loop 只需要前者。
+    """
+    monkeypatch.setenv("USE_BEDROCK", "false")
+    reset()
+    _seed_acc001_for_replan(datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI))
+
+    def explode(*a, **kw):
+        raise AssertionError("regenerate_report=False 時不該呼叫 generate_report")
+
+    monkeypatch.setattr(orchestrator.GATEWAY, "generate_report", explode)
+
+    result = check_and_replan_routes(
+        "TPE_2026_ACC_001", datetime(2026, 5, 20, 22, 15, tzinfo=_TZ_TAIPEI),
+        regenerate_report=False,
+    )
+
+    assert result is not None and result.replanned
+    assert result.report_pending is True
+    # 路線是新的
+    assert result.new_primary == "RD_TPE_005"
+    # 建議書維持舊版（空著會讓報告區塊整塊消失，比舊報告更難理解）
+    assert result.new_decision_result.control_center_report == "（初次建議書）"
+
+
+def test_deferred_report_catches_up():
+    """背景補寫完成後，建議書要真的換成新的。"""
+    import os
+
+    os.environ["USE_BEDROCK"] = "false"
+    reset()
+    _seed_acc001_for_replan(datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI))
+
+    result = check_and_replan_routes(
+        "TPE_2026_ACC_001", datetime(2026, 5, 20, 22, 15, tzinfo=_TZ_TAIPEI),
+        regenerate_report=False,
+    )
+    record = get_global_state().active_incidents["TPE_2026_ACC_001"]
+    assert record.report_stale is True
+
+    updated = orchestrator.regenerate_report_for(
+        "TPE_2026_ACC_001", result.replan_count
+    )
+    assert updated is not None
+    assert updated.control_center_report != "（初次建議書）"
+    assert "仁愛路四段" in updated.control_center_report
+    assert record.report_stale is False
+
+
+def test_stale_report_is_discarded_not_written_back():
+    """補寫期間又重規劃過，那份建議書講的是舊路線，不得寫回。
+
+    寫回去會讓建議書與路線面板互相矛盾——指揮官照著建議書走的路，
+    跟地圖上畫的不是同一條。
+    """
+    import os
+
+    os.environ["USE_BEDROCK"] = "false"
+    reset()
+    _seed_acc001_for_replan(datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI))
+
+    first = check_and_replan_routes(
+        "TPE_2026_ACC_001", datetime(2026, 5, 20, 22, 15, tzinfo=_TZ_TAIPEI),
+        regenerate_report=False,
+    )
+    # 模擬「補寫還沒回來，路況又變了」
+    check_and_replan_routes(
+        "TPE_2026_ACC_001", datetime(2026, 5, 20, 22, 30, tzinfo=_TZ_TAIPEI),
+        regenerate_report=False,
+    )
+
+    stale = orchestrator.regenerate_report_for("TPE_2026_ACC_001", first.replan_count)
+    assert stale is None, "過時的建議書必須整份丟掉，不能寫回"
+
+
+def test_replan_accepts_a_preloaded_bundle(monkeypatch):
+    """模擬迴圈每分鐘本來就載過一次資料，不該再載一次。"""
+    import os
+
+    os.environ["USE_BEDROCK"] = "false"
+    reset()
+    _seed_acc001_for_replan(datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI))
+
+    bundle = orchestrator.GATEWAY.load_data()
+    monkeypatch.setattr(
+        orchestrator.GATEWAY, "load_data",
+        lambda: (_ for _ in ()).throw(AssertionError("已傳入 bundle 就不該重載")),
+    )
+
+    result = check_and_replan_routes(
+        "TPE_2026_ACC_001", datetime(2026, 5, 20, 22, 15, tzinfo=_TZ_TAIPEI),
+        regenerate_report=False, bundle=bundle,
+    )
+    assert result is not None and result.replanned
+
+
+# ---------------------------------------------------------------------------
+# [2026-08-02] 注入事件時不讓 LLM 卡住模擬時鐘：確定性部分先回，敘述背景補
+# ---------------------------------------------------------------------------
+
+
+def test_defer_narrative_skips_both_llm_stages(monkeypatch):
+    """`defer_narrative=True` 時**完全不得**呼叫建議書生成與決策說明。
+
+    這兩段是注入事件時唯一的長時間阻塞（實測合計約 28 秒），而路線、ETE、
+    風險推演加起來只要 0.01 秒——畫面上該立刻出現的東西全在那 0.01 秒裡。
+    """
+    import asyncio
+
+    monkeypatch.setenv("USE_BEDROCK", "false")
+    reset()
+    orchestrator.GATEWAY = orchestrator.build_gateway()
+
+    def explode_report(*a, **kw):
+        raise AssertionError("defer_narrative=True 時不該生成建議書")
+
+    monkeypatch.setattr(orchestrator.GATEWAY, "generate_report", explode_report)
+
+    import src.decision_trace as dt
+
+    def explode_explain(_trace_id):
+        raise AssertionError("defer_narrative=True 時不該生成決策說明")
+
+    monkeypatch.setattr(dt, "generate_report_explanation", explode_explain)
+
+    incident = Incident(
+        event_id="TPE_2026_ACC_001", type="Road_Collapse_Accident",
+        location="光復南路/忠孝東路口", affected_segment="RD_TPE_002",
+        status="Closed", severity=IncidentSeverity.CRITICAL,
+        description="路面塌陷",
+        timestamp=datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI),
+    )
+    result = asyncio.run(orchestrator.handle_incident(incident, defer_narrative=True))
+
+    # 確定性產出全部到位——這些就是使用者立刻要看到的
+    assert result.routes is not None and result.routes.primary.segment_id == "RD_TPE_004"
+    assert result.ete is not None and result.ete.minutes == 90
+    assert result.projected_risks is not None
+    # 敘述留白，交給背景補
+    assert result.control_center_report is None
+    assert get_global_state().active_incidents["TPE_2026_ACC_001"].report_stale is True
+
+
+def test_generate_incident_narrative_fills_in_the_report():
+    """背景補完之後建議書要真的出現，且 report_stale 歸零。"""
+    import asyncio
+    import os
+
+    os.environ["USE_BEDROCK"] = "false"
+    reset()
+    orchestrator.GATEWAY = orchestrator.build_gateway()
+
+    incident = Incident(
+        event_id="TPE_2026_ACC_001", type="Road_Collapse_Accident",
+        location="光復南路/忠孝東路口", affected_segment="RD_TPE_002",
+        status="Closed", severity=IncidentSeverity.CRITICAL,
+        description="路面塌陷",
+        timestamp=datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI),
+    )
+    asyncio.run(orchestrator.handle_incident(incident, defer_narrative=True))
+
+    updated = orchestrator.generate_incident_narrative("TPE_2026_ACC_001")
+    assert updated is not None
+    assert updated.control_center_report, "背景補完必須有建議書"
+    assert "市民大道四段" in updated.control_center_report
+    # 路線與 ETE 不得在補寫過程中被改動
+    assert updated.routes.primary.segment_id == "RD_TPE_004"
+    assert updated.ete.minutes == 90
+
+    record = get_global_state().active_incidents["TPE_2026_ACC_001"]
+    assert record.report_stale is False
+    assert record.decision_result.control_center_report
+
+
+def test_default_still_generates_narrative_inline():
+    """預設行為不變——沒傳 defer_narrative 的呼叫端照舊拿到完整結果。"""
+    import asyncio
+    import os
+
+    os.environ["USE_BEDROCK"] = "false"
+    reset()
+    orchestrator.GATEWAY = orchestrator.build_gateway()
+
+    incident = Incident(
+        event_id="TPE_2026_ACC_001", type="Road_Collapse_Accident",
+        location="光復南路/忠孝東路口", affected_segment="RD_TPE_002",
+        status="Closed", severity=IncidentSeverity.CRITICAL,
+        description="路面塌陷",
+        timestamp=datetime(2026, 5, 20, 22, 10, tzinfo=_TZ_TAIPEI),
+    )
+    result = asyncio.run(orchestrator.handle_incident(incident))
+    assert result.control_center_report, "預設仍應同步產出建議書"

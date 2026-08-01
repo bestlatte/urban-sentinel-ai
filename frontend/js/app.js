@@ -191,7 +191,11 @@ function onDecisionCompleted(decision) {
     ChatState.currentTraceId = decision.trace_id;
   }
 
-  
+  // [2026-08-02] 建議書是否還在背景生成。注入事件時後端只等確定性部分
+  // （路線、ETE、風險推演，約 0.3 秒）就回傳，建議書與決策說明另外補——
+  // 否則模擬時鐘要為那兩段 LLM 停三十幾秒。
+  decision._reportPending = decision.report_pending === true;
+
   const eventId = decision.incident?.event_id || decision.trace_id;
   
   // ★ 判斷是否為 cascade replan 後的更新
@@ -1266,8 +1270,15 @@ function openReportModal() {
   // 建議書全文
   if (d.control_center_report) {
     html += `<div class="report-section">`;
-    html += `<div class="report-section-label">交控建議書全文</div>`;
+    html += `<div class="report-section-label">交控建議書全文${_reportPendingBadge(d)}</div>`;
     html += `<div class="report-full-text md">${renderMarkdown(d.control_center_report)}</div>`;
+    html += `</div>`;
+  } else if (d._reportPending) {
+    // 還沒有任何建議書（初次注入時建議書在背景生成）。留一塊佔位，
+    // 否則整個區塊消失會讓人以為系統漏做了這一步。
+    html += `<div class="report-section">`;
+    html += `<div class="report-section-label">交控建議書全文</div>`;
+    html += _reportGeneratingPlaceholder();
     html += `</div>`;
   }
 
@@ -1962,14 +1973,18 @@ function onRoutesUpdated(payload) {
     }
   }
   
-  // ★ 更新報告書與簡訊內容（使用後端重新生成的版本）
+  // ★ 更新報告書與簡訊內容
+  //
+  // [2026-08-02] `report_pending` 為 true 時，這裡帶的是**上一版**的建議書文字：
+  // 路線重算是毫秒級的、建議書重寫是 20 秒的 LLM 呼叫，後端把兩者拆開，
+  // 路線先推、建議書隨後由 `report.updated.v1` 補上。標記為 pending 讓報告
+  // 區塊顯示「更新中」，而不是讓使用者以為眼前這份講的是新路線。
+  decision._reportPending = payload.report_pending === true;
   if (payload.control_center_report !== undefined) {
     decision.control_center_report = payload.control_center_report;
-    console.log("[路線重規劃] 報告書已更新");
   }
   if (payload.notifications !== undefined) {
     decision.notifications = payload.notifications;
-    console.log("[路線重規劃] 簡訊內容已更新");
   }
   
   // 重新渲染報告（如果當前顯示的是這個事件）
@@ -1996,6 +2011,61 @@ function onRoutesUpdated(payload) {
   
   // 顯示路線更新提示彈窗
   _showRouteUpdateAlert(payload);
+}
+
+/**
+ * 「建議書更新中」標記。
+ *
+ * 路線已經是新的、但文字還是上一版時一定要講。少了它，指揮官會照著一份
+ * 講著舊路線的建議書行動，而地圖上畫的已經是另一條路——兩者不一致而且
+ * 畫面上沒有任何跡象。
+ */
+function _reportPendingBadge(decision) {
+  if (!decision || !decision._reportPending) return "";
+  return `<span style="margin-left:8px;font-size:0.65rem;font-weight:500;color:hsl(38,92%,45%)">
+    ⟳ 路線已更新，建議書重寫中…（下方為上一版）</span>`;
+}
+
+/**
+ * 建議書還沒有任何版本時的佔位（初次注入）。
+ *
+ * 明確講出「路線與 ETE 已經算好了」——那正是指揮官第一時間需要的資訊，
+ * 而且已經在畫面上了。少了這句，空白會讓人以為整個決策都還沒完成。
+ */
+function _reportGeneratingPlaceholder() {
+  return `<div style="padding:14px;border:1px dashed var(--border);border-radius:6px;
+      color:var(--text-muted);font-size:0.78rem;line-height:1.7">
+    <div style="color:hsl(38,92%,45%);font-weight:600;margin-bottom:4px">⟳ 交控建議書生成中…</div>
+    路線規劃、恢復時間與風險推演都已完成並顯示在上方，可以先據此行動。<br>
+    建議書全文由 LLM 撰寫，約需 20 秒，完成後會自動出現。
+  </div>`;
+}
+
+/**
+ * 建議書背景補寫完成（`report.updated.v1`）。
+ *
+ * [2026-08-02] 路線與建議書分兩次推播：路線重算是毫秒級的確定性運算，
+ * 建議書重寫是約 20 秒的 LLM 呼叫。綁在一起的時候，模擬時鐘要等完那 20 秒
+ * 才會繼續走——使用者看到的是畫面當掉。現在路線立刻更新，文字隨後補上。
+ */
+function onReportUpdated(payload) {
+  const eventId = payload.event_id;
+  if (!eventId) return;
+
+  const decision = _allDecisions.get(eventId);
+  if (!decision) return;
+
+  decision._reportPending = false;
+  if (payload.control_center_report !== undefined) {
+    decision.control_center_report = payload.control_center_report;
+  }
+  if (payload.notifications !== undefined) {
+    decision.notifications = payload.notifications;
+  }
+
+  if (_currentEventId === eventId) _renderReportContent(decision);
+  _renderReportTabs();
+  if (typeof renderIncidentMonitor === "function") renderIncidentMonitor();
 }
 
 // 將路線變更加入 Activity Log
@@ -2874,8 +2944,13 @@ function renderReportDetail(decision) {
   // 安全性不變。
   if (decision.control_center_report) {
     html += `<div class="report-section">`;
-    html += `<div class="report-section-title">交控建議書全文</div>`;
+    html += `<div class="report-section-title">交控建議書全文${_reportPendingBadge(decision)}</div>`;
     html += `<div class="report-full-content md">${renderMarkdown(decision.control_center_report)}</div>`;
+    html += `</div>`;
+  } else if (decision._reportPending) {
+    html += `<div class="report-section">`;
+    html += `<div class="report-section-title">交控建議書全文</div>`;
+    html += _reportGeneratingPlaceholder();
     html += `</div>`;
   }
   

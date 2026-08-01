@@ -551,6 +551,14 @@ class IncidentRecord:
     """該事件的路線重規劃次數。"""
     last_route_check_at: datetime | None = None
     """上次檢查路線有效性的時間。"""
+    report_stale: bool = False
+    """建議書還沒跟上路線（背景生成／重寫中）。前端據此顯示「生成中」而不是
+    讓使用者以為報告區塊壞了、或以為眼前這份講的是最新路線。"""
+    merged_incident_info_cache: dict | None = None
+    """`defer_narrative` 時暫存的同路段合併資訊，背景補建議書時要用。
+
+    它是在決策週期中算出來的（同路段有幾起事件、合併後的 ETE），
+    背景補寫時重算會需要整套週期上下文，直接留著比較實在。"""
     last_route_state_signature: str | None = None
     """上次已推播出去的路線狀態指紋（主線/次線/失效原因/有無可替補）。
 
@@ -890,13 +898,32 @@ async def _broadcast_task_update(
         pass  # 推播失敗不影響主流程
 
 
-async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResult:
+async def handle_incident(
+    event: Incident,
+    ws_broadcaster=None,
+    *,
+    defer_narrative: bool = False,
+) -> DecisionResult:
     """D4 監聽器呼叫入口，對應 REST POST /api/incidents/evaluate。
 
     七階段生命週期：OPEN→FLAGS→PLAN→EXECUTE→SUMMARY→EXPLAIN→PUSH。
 
     ws_broadcaster: 可選 async function，用於推播 decision.task_update.v1
     讓前端 Agent 活動面板即時顯示每一步的進度。
+
+    defer_narrative: True 時跳過建議書生成（C1-C4）與決策說明（M4B），
+        由呼叫端自行在背景呼叫 `generate_incident_narrative()` 補上。
+
+        [2026-08-02] 這是「注入事件時模擬時鐘會停住」的解法。整個週期裡：
+
+            路線 + ETE + 風險推演（確定性）  合計約 0.3 秒
+            A2 規劃器（LLM）                最多 8 秒
+            **建議書生成（LLM）**            **最多 30 秒**
+            **決策說明（LLM）**              **約 5~10 秒**
+
+        畫面上該立刻出現的東西——地圖上的改道路線、ETE、應變等級、風險
+        時間軸——全部在那 0.3 秒裡就算完了。讓時鐘為了後面兩段 LLM 敘述
+        停住三十幾秒，是拿使用者最在意的流暢度去換一段他還沒開始讀的文字。
 
     [2026-08-01 修正：這個函式原本會凍結整個伺服器約 15~30 秒]
     ---------------------------------------------------------
@@ -1165,10 +1192,14 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
     advisory: BedrockAdvisory | None = None
 
     # 報告生成
-    if ete is not None:
+    #
+    # [2026-08-02] `defer_narrative=True` 時整段跳過，交給呼叫端在背景補
+    # （`generate_incident_narrative()`）。這是「注入事件時模擬時鐘會停住」的解法：
+    # 這一步是整個週期唯一的長時間阻塞（最多 30 秒），而路線、ETE、風險推演
+    # 加起來只要 0.3 秒——畫面上該立刻出現的東西全在那 0.3 秒裡。
+    if ete is not None and not defer_narrative:
         _dispatch_seq += 1
-        # 這一則帶 eta_seconds=20，前端據此畫進度條——這是整個週期唯一會讓
-        # 使用者等到懷疑系統當掉的階段（見 _TASK_ETA_SECONDS）。
+        # 這一則帶 eta_seconds=20，前端據此畫進度條（見 _TASK_ETA_SECONDS）。
         await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "report_started")
         try:
             report_text, notification = await asyncio.to_thread(
@@ -1210,17 +1241,18 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         logger.warning(f"record_step CYCLE_SUMMARY 失敗: {e}")
 
     # --- 6. EXPLAIN ---
-    _dispatch_seq += 1
-    await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "explain_started")
-    try:
-        from src.decision_trace import generate_report_explanation
-        # 又一個 Bedrock 呼叫（~5~10 秒）。不包 to_thread 的話，前面辛苦解掉的
-        # 阻塞會在最後一步再犯一次。
-        await asyncio.to_thread(generate_report_explanation, trace_id)
-    except Exception as e:
-        logger.warning(f"generate_report_explanation 失敗（降級）: {e}")
-    _dispatch_seq += 1
-    await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "explain_done")
+    # 同樣是 Bedrock 呼叫（~5~10 秒），`defer_narrative` 時一併移出關鍵路徑。
+    if not defer_narrative:
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "explain_started")
+        try:
+            from src.decision_trace import generate_report_explanation
+            # 不包 to_thread 的話，前面辛苦解掉的阻塞會在最後一步再犯一次。
+            await asyncio.to_thread(generate_report_explanation, trace_id)
+        except Exception as e:
+            logger.warning(f"generate_report_explanation 失敗（降級）: {e}")
+        _dispatch_seq += 1
+        await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "explain_done")
 
     # --- 7. PUSH ---
     # [2026-07-28架構複查修正：回應SPEC-O3對照表第8項，同 handle_trigger_batch() 的修正]
@@ -1255,8 +1287,75 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
     record = _STATE.active_incidents.get(event.event_id)
     if record:
         record.decision_result = decision_result
+        # 建議書還沒生成，前端據此顯示「生成中」而不是讓報告區塊空著看起來像壞了
+        record.report_stale = defer_narrative
+        if defer_narrative:
+            record.merged_incident_info_cache = merged_incident_info
 
     return decision_result
+
+
+def generate_incident_narrative(event_id: str) -> DecisionResult | None:
+    """補上建議書（C1-C4）與決策說明（M4B）。跟 `defer_narrative=True` 配對使用。
+
+    [2026-08-02] 拆出來的目的跟 `regenerate_report_for()` 一樣：把 LLM 移出
+    模擬時鐘的關鍵路徑。差別在這裡是**初次決策**——建議書從無到有，而不是重寫。
+
+    決策說明（`generate_report_explanation`）也在這裡跑：它讀的是決策軌跡，
+    而軌跡在 `handle_incident()` 回傳前就已經寫完了，所以事後補完全等價。
+
+    失敗只是少一份文字敘述，路線、ETE、風險推演都已經在畫面上了。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return None
+
+    decision = record.decision_result
+    if decision.ete is None or record.sensing_result is None:
+        record.report_stale = False
+        return None
+
+    bundle = record.bundle_snapshot or GATEWAY.load_data()
+    degraded = list(decision.degraded)
+    report_text = decision.control_center_report
+    notification = decision.notifications
+
+    try:
+        report_text, notification = GATEWAY.generate_report(
+            record.incident,
+            record.sensing_result,
+            decision.routes,
+            decision.ete,
+            None,
+            bundle,
+            getattr(record, "merged_incident_info_cache", None),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[建議書生成] {event_id} 失敗: {e}")
+        if "C1_FAILED" not in degraded:
+            degraded.append("C1_FAILED")
+
+    if report_text is None and "C1_FAILED" not in degraded:
+        degraded.append("C1_FAILED")
+    if notification is None and _STATE.multilingual and "C4_FAILED" not in degraded:
+        degraded.append("C4_FAILED")
+
+    try:
+        from src.decision_trace import generate_report_explanation
+
+        generate_report_explanation(decision.trace_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[決策說明] {event_id} 生成失敗（降級）: {e}")
+
+    updated = decision.model_copy(update={
+        "control_center_report": report_text,
+        "notifications": notification,
+        "degraded": degraded,
+    })
+    record.decision_result = updated
+    record.report_stale = False
+    logger.info(f"[建議書生成] {event_id} 建議書與決策說明已補上")
+    return updated
 
 
 _FORWARD_LOOKING_WORDS = ("如果", "假設", "若", "會怎樣", "怎麼辦")
@@ -1518,6 +1617,15 @@ class RouteMonitorResult:
 
     前端據此跳「⚠️ 無可用替代路線」嚴重警示，而不是「🔄 路線更新」。
     """
+    report_pending: bool = False
+    """路線已更新，但建議書還沒重寫（`regenerate_report=False` 時為 True）。
+
+    [2026-08-02] 路線重算是毫秒級的確定性運算，建議書重寫是約 20 秒的 LLM 呼叫。
+    以前兩件事綁在同一個函式裡，模擬 tick loop 要等完整整 20 秒，時鐘停住不動。
+    拆開之後：路線立刻套用並推播，建議書由呼叫端丟到背景補，補完再推一次。
+    """
+    replan_count: int = 0
+    """完成這次重規劃後的累計次數。背景補建議書時用來判斷自己是不是已經過時。"""
 
 
 @dataclass
@@ -1634,12 +1742,32 @@ def route_replan_needed(event_id: str, as_of: datetime, bundle=None) -> bool:
 def check_and_replan_routes(
     event_id: str,
     as_of: datetime,
+    *,
+    regenerate_report: bool = True,
+    bundle: NormalizedDataBundle | None = None,
 ) -> RouteMonitorResult | None:
     """檢查指定事件的推薦路線是否仍有效，失效則重新規劃。
 
-    此函式由背景監測迴圈呼叫。路線計算本身純確定性（只呼叫 routing/rules），
-    但**重規劃成功時會重新生成建議書**，那一步會呼叫 LLM。
     回傳 None 表示該 event_id 不存在於 active_incidents 或尚無 decision_result。
+
+    Args:
+        regenerate_report: False 時**只做確定性的路線重算**，跳過建議書重寫。
+
+            [2026-08-02] 這個開關是為了不讓模擬時鐘卡住。函式裡本來混著兩件
+            性質完全不同的事：
+
+                路線重算    純確定性、無 I/O、**毫秒級**
+                建議書重寫  LLM 呼叫、**約 20 秒**
+
+            模擬 tick loop 會 await 整個函式，所以每次重規劃時鐘就停 20 秒，
+            使用者看到的是畫面當掉。但畫面上真正該立刻更新的是路線——地圖、
+            路線面板、「無路可替補」警示全都只需要毫秒級的那一半。
+
+            呼叫端傳 False 拿到立即可用的路線結果，再自行把
+            `regenerate_report_for()` 丟到背景補建議書。
+
+        bundle: 已經載入好的資料。模擬迴圈每分鐘本來就會載一次，
+            傳進來可以省掉重複的檔案 I/O。
     """
     record = _STATE.active_incidents.get(event_id)
     if record is None or record.decision_result is None:
@@ -1650,8 +1778,9 @@ def check_and_replan_routes(
         # 此事件本來就不需要路網規劃（例如 SOP-3/5）
         return None
 
-    # 取得當前 bundle（非快照，用即時資料檢查飽和度）
-    bundle = GATEWAY.load_data()
+    # 當前 bundle（非快照，用即時資料檢查飽和度）
+    if bundle is None:
+        bundle = GATEWAY.load_data()
 
     closed_segments = current_closed_segments()
 
@@ -1734,8 +1863,14 @@ def check_and_replan_routes(
     new_report = old_decision.control_center_report
     new_notification = old_decision.notifications
     degraded = list(old_decision.degraded)
-    
-    if record.sensing_result is not None:
+    report_pending = False
+
+    if not regenerate_report:
+        # 只更新路線，建議書留給呼叫端在背景補（見 regenerate_report_for()）。
+        # 舊建議書先留著——空著會讓畫面上的報告區塊整塊消失，那比一份標示為
+        # 「更新中」的舊報告更難理解。
+        report_pending = True
+    elif record.sensing_result is not None:
         try:
             new_report, new_notification = GATEWAY.generate_report(
                 incident=record.incident,
@@ -1752,7 +1887,7 @@ def check_and_replan_routes(
                 degraded.append("C1_REPLAN_FAILED")
     else:
         logger.warning(f"[路線監測] {event_id} 缺少 sensing_result，無法重新生成報告書")
-    
+
     new_decision = DecisionResult(
         trace_id=old_decision.trace_id,
         triggered_by=old_decision.triggered_by,
@@ -1770,10 +1905,13 @@ def check_and_replan_routes(
     )
     record.decision_result = new_decision
     record.route_replan_count += 1
+    record.report_stale = report_pending
 
     return RouteMonitorResult(
         event_id=event_id,
         replanned=True,
+        report_pending=report_pending,
+        replan_count=record.route_replan_count,
         old_primary=old_primary_id,
         new_primary=new_primary_id,
         old_secondary=old_secondary_id,
@@ -1783,6 +1921,73 @@ def check_and_replan_routes(
         route_changed=route_changed,
         no_alternative_available=no_alternative_available,
     )
+
+
+def get_replan_count(event_id: str) -> int:
+    """該事件目前的重規劃次數。背景補建議書時用來判斷自己有沒有過時。"""
+    record = _STATE.active_incidents.get(event_id)
+    return record.route_replan_count if record else -1
+
+
+def regenerate_report_for(event_id: str, expected_replan_count: int) -> DecisionResult | None:
+    """事後補上建議書（LLM，約 20 秒）。給 `regenerate_report=False` 的呼叫端配對使用。
+
+    [2026-08-02] 拆出來的目的是把 LLM 移出模擬 tick loop 的關鍵路徑。
+    路線在毫秒內就更新並推播完畢，這一步只是讓文字敘述追上。
+
+    `expected_replan_count` 是**防呆而不是最佳化**：這 20 秒之內路況可能又變了、
+    又重規劃了一次。若寫回時發現次數已經前進，代表手上這份建議書講的是
+    上一個版本的路線——寫回去會讓建議書與路線面板互相矛盾，寧可整份丟掉。
+    回傳 None 就是這種情況（呼叫端可以決定要不要再跑一次）。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return None
+    if record.route_replan_count != expected_replan_count:
+        logger.info(
+            f"[建議書補寫] {event_id} 已被更新的重規劃取代"
+            f"（{expected_replan_count} → {record.route_replan_count}），本次不寫回"
+        )
+        return None
+    if record.sensing_result is None:
+        logger.warning(f"[建議書補寫] {event_id} 缺少 sensing_result，無法重新生成")
+        record.report_stale = False
+        return None
+
+    decision = record.decision_result
+    bundle = GATEWAY.load_data()
+
+    try:
+        new_report, new_notification = GATEWAY.generate_report(
+            incident=record.incident,
+            sensing=record.sensing_result,
+            route_plan=decision.routes,
+            ete=decision.ete,
+            advisory=None,
+            bundle=bundle,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[建議書補寫] {event_id} 生成失敗: {e}，保留原報告")
+        record.report_stale = False
+        degraded = list(decision.degraded)
+        if "C1_REPLAN_FAILED" not in degraded:
+            degraded.append("C1_REPLAN_FAILED")
+        record.decision_result = decision.model_copy(update={"degraded": degraded})
+        return record.decision_result
+
+    # 生成期間又被重規劃過就不要寫回——理由見 docstring
+    if record.route_replan_count != expected_replan_count:
+        logger.info(f"[建議書補寫] {event_id} 生成期間路線又變了，捨棄這份建議書")
+        return None
+
+    updated = decision.model_copy(update={
+        "control_center_report": new_report,
+        "notifications": new_notification,
+    })
+    record.decision_result = updated
+    record.report_stale = False
+    logger.info(f"[建議書補寫] {event_id} 建議書與簡訊已更新")
+    return updated
 
 
 def monitor_all_active_routes(as_of: datetime) -> list[RouteMonitorResult]:

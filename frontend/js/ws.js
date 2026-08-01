@@ -151,6 +151,12 @@ function handleServerMessage(msg) {
       if (typeof onRoutesUpdated === "function") onRoutesUpdated(payload);
       break;
 
+    // 建議書背景補寫完成。路線在 routes.updated.v1 時就已經更新了，
+    // 這一則只換文字——兩者分開推是為了不讓 LLM 的 20 秒擋住路線更新。
+    case "report.updated.v1":
+      if (typeof onReportUpdated === "function") onReportUpdated(payload);
+      break;
+
     // ===== 事件解除推播 =====
     case "incident.resolved.v1":
       if (typeof onIncidentResolved === "function") onIncidentResolved(payload);

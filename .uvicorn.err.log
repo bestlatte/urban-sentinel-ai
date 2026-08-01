@@ -1,21 +1,254 @@
-06:22:38 [INFO] src.env: 已從 C:\Users\User\urban-sentinel-ai\.env 載入 12 個環境變數：AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY, BEDROCK_KNOWLEDGE_BASE_ID, BEDROCK_MODEL_ID, DECISION_LOG_TABLE, LINE_CHANNEL_ACCESS_TOKEN, LINE_ENABLED, LINE_TO_USER_ID, S3_DATA_BUCKET, USE_BEDROCK, USE_STUB_MODULES
-INFO:     Started server process [33616]
+07:01:13 [INFO] src.env: 已從 C:\Users\User\urban-sentinel-ai\.env 載入 12 個環境變數：AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY, BEDROCK_KNOWLEDGE_BASE_ID, BEDROCK_MODEL_ID, DECISION_LOG_TABLE, LINE_CHANNEL_ACCESS_TOKEN, LINE_ENABLED, LINE_TO_USER_ID, S3_DATA_BUCKET, USE_BEDROCK, USE_STUB_MODULES
+INFO:     Started server process [33960]
 INFO:     Waiting for application startup.
-06:22:43 [INFO] src.bedrock_status: Bedrock 恢復可用（model=global.anthropic.claude-sonnet-4-5-20250929-v1:0）
-06:22:43 [WARNING] src.loaders: intersections 含外部交會點: 正氣橋 (in RD_TPE_009)（同類警告本次啟動後不再重複）
-06:22:43 [INFO] main: 啟動時規則掃描完成：4 條規則觸發
+07:01:16 [INFO] src.bedrock_status: Bedrock 恢復可用（model=global.anthropic.claude-sonnet-4-5-20250929-v1:0）
+07:01:16 [WARNING] src.loaders: intersections 含外部交會點: 正氣橋 (in RD_TPE_009)（同類警告本次啟動後不再重複）
+07:01:16 [INFO] main: 啟動時規則掃描完成：4 條規則觸發
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     127.0.0.1:53863 - "WebSocket /ws" [accepted]
+INFO:     127.0.0.1:65343 - "WebSocket /ws" [accepted]
 INFO:     connection open
-06:27:25 [INFO] main: [模擬 21:02] 忠孝東路四段 等級變化: normal → B
-06:27:25 [INFO] main: [模擬 21:02] 光復南路 等級變化: normal → B
-06:27:25 [INFO] main: [模擬 21:02] 基隆路一段 等級變化: normal → B
-06:27:26 [INFO] main: [模擬 22:01] 忠孝東路四段 等級變化: B → A
-06:27:26 [INFO] main: [模擬 22:01] 光復南路 等級變化: B → A
-06:27:26 [INFO] main: [模擬 22:01] 基隆路一段 等級變化: B → A
-06:27:37 [INFO] main: [評估時刻] 事件 TPE_2026_ACC_001 使用 2026-05-20 22:11（來源：simulation）
-06:27:41 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_ACC_001）: RAG_SEARCH → GRAPH_BUILD → UPSTREAM_JUDGE → CANDIDATE_FILTER → ROUTE_SELECT → CALC_ETE → FORMAT_REPORT
-06:28:02 [INFO] src.line_notify: LINE 通報已送出（broadcast，134 字）
-06:28:18 [INFO] src.line_notify: LINE 通報已送出（broadcast，155 字）
-06:28:29 [INFO] src.line_notify: LINE 通報已送出（broadcast，278 字）
+INFO:     127.0.0.1:56177 - "WebSocket /ws" [accepted]
+INFO:     connection open
+07:02:14 [INFO] main: [模擬 21:26] 忠孝東路四段 等級變化: normal → B
+07:02:14 [INFO] main: [模擬 21:26] 光復南路 等級變化: normal → B
+07:02:14 [INFO] main: [模擬 21:26] 基隆路一段 等級變化: normal → B
+07:02:17 [INFO] main: [模擬 22:01] 忠孝東路四段 等級變化: B → A
+07:02:17 [INFO] main: [模擬 22:01] 光復南路 等級變化: B → A
+07:02:17 [INFO] main: [模擬 22:01] 基隆路一段 等級變化: B → A
+07:02:17 [INFO] main: [評估時刻] 事件 TPE_2026_EVT_005 使用 2026-05-20 22:01（來源：simulation）
+07:02:20 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_EVT_005）: RAG_SEARCH → CALC_ETE → FORMAT_REPORT
+07:02:29 [INFO] src.orchestrator: [建議書生成] TPE_2026_EVT_005 建議書與決策說明已補上
+07:02:31 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:02:31 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:02:31 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:02:31 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:02:46 [INFO] main: [模擬 22:30] 市民大道四段 等級變化: B → A
+07:02:46 [INFO] main: [模擬 22:30] 仁愛路四段 等級變化: normal → B
+07:02:46 [INFO] main: [模擬 22:30] 敦化南路一段 等級變化: B → A
+07:02:46 [INFO] main: [模擬 22:30] 松高路 等級變化: normal → B
+07:02:46 [INFO] main: [模擬 22:30] 松壽路 等級變化: normal → B
+07:02:46 [INFO] main: [模擬 22:30] 敦化南路二段 等級變化: normal → B
+07:02:46 [INFO] main: [模擬 22:30] 信義路五段 等級變化: normal → B
+INFO:     127.0.0.1:54897 - "WebSocket /ws" [accepted]
+INFO:     connection open
+07:03:05 [INFO] main: [模擬 21:10] 忠孝東路四段 等級變化: normal → B
+07:03:05 [INFO] main: [模擬 21:10] 光復南路 等級變化: normal → B
+07:03:05 [INFO] main: [模擬 21:10] 基隆路一段 等級變化: normal → B
+07:03:06 [INFO] main: [模擬 21:53] 忠孝東路四段 等級變化: B → A
+07:03:06 [INFO] main: [模擬 21:53] 光復南路 等級變化: B → A
+07:03:06 [INFO] main: [模擬 21:53] 基隆路一段 等級變化: B → A
+07:03:06 [INFO] main: [模擬 21:53] 延吉街 等級變化: A → B
+07:03:08 [INFO] main: [模擬 22:16] 市民大道四段 等級變化: normal → B
+07:03:08 [INFO] main: [模擬 22:16] 敦化南路一段 等級變化: normal → B
+07:03:08 [INFO] main: [模擬 22:16] 延吉街 等級變化: B → A
+07:03:08 [INFO] main: [模擬 22:16] 基隆路地下道 等級變化: normal → B
+07:03:17 [INFO] main: [模擬 21:45] 延吉街 等級變化: A → B
+07:03:31 [INFO] main: [評估時刻] 事件 TPE_2026_ACC_001 使用 2026-05-20 22:12（來源：simulation）
+07:03:33 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:03:33 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:03:33 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:03:33 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:03:34 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_ACC_001）: RAG_SEARCH → GRAPH_BUILD → UPSTREAM_JUDGE → CANDIDATE_FILTER → ROUTE_SELECT → CALC_ETE → FORMAT_REPORT
+07:03:35 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:03:35 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（primary）：{'RD_TPE_004': 'SATURATED_0.85'}
+07:03:46 [INFO] src.orchestrator: [建議書生成] TPE_2026_ACC_001 建議書與決策說明已補上
+07:03:47 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:03:48 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:03:49 [INFO] main: [模擬 22:30] 市民大道四段 等級變化: B → A
+07:03:49 [INFO] main: [模擬 22:30] 仁愛路四段 等級變化: normal → B
+07:03:49 [INFO] main: [模擬 22:30] 敦化南路一段 等級變化: B → A
+07:03:49 [INFO] main: [模擬 22:30] 松高路 等級變化: normal → B
+07:03:49 [INFO] main: [模擬 22:30] 松壽路 等級變化: normal → B
+07:03:49 [INFO] main: [模擬 22:30] 敦化南路二段 等級變化: normal → B
+07:03:49 [INFO] main: [模擬 22:30] 信義路五段 等級變化: normal → B
+07:03:49 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:49 [WARNING] src.orchestrator: [路線監測] TPE_2026_ACC_001 已無可替補路段（no_feasible_route=False、全數飽和=True）；主線=RD_TPE_004、次線=RD_TPE_005 為權宜指派
+07:03:49 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（both）：{'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}
+07:03:50 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:51 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:52 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:53 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:54 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:03:58 [INFO] src.orchestrator: [建議書補寫] TPE_2026_ACC_001 建議書與簡訊已更新
+INFO:     127.0.0.1:62477 - "WebSocket /ws" [accepted]
+INFO:     connection open
+07:04:18 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:04:23 [INFO] main: [模擬 21:41] 忠孝東路四段 等級變化: normal → A
+07:04:23 [INFO] main: [模擬 21:41] 光復南路 等級變化: normal → A
+07:04:23 [INFO] main: [模擬 21:41] 基隆路一段 等級變化: normal → B
+07:04:24 [INFO] main: [模擬 22:13] 基隆路一段 等級變化: B → A
+07:04:26 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:04:26 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:04:26 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:04:26 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:04:27 [INFO] main: [模擬 21:37] 基隆路一段 等級變化: A → B
+07:04:28 [INFO] main: [模擬 21:53] 基隆路一段 等級變化: B → A
+07:04:28 [INFO] main: [模擬 21:53] 延吉街 等級變化: A → B
+INFO:     127.0.0.1:54458 - "WebSocket /ws" [accepted]
+INFO:     connection open
+07:04:49 [INFO] main: [評估時刻] 事件 TPE_2026_ACC_001 使用 2026-05-20 22:12（來源：simulation）
+07:04:52 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_ACC_001）: RAG_SEARCH → GRAPH_BUILD → UPSTREAM_JUDGE → CANDIDATE_FILTER → ROUTE_SELECT → CALC_ETE → FORMAT_REPORT
+07:05:03 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:05:03 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:05:03 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:05:03 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:05:03 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:03 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（primary）：{'RD_TPE_004': 'SATURATED_0.85'}
+07:05:03 [INFO] src.orchestrator: [建議書生成] TPE_2026_ACC_001 建議書與決策說明已補上
+07:05:04 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:05 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:06 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:07 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:08 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:09 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:10 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:11 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:12 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:13 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:14 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:15 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:16 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:17 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:05:18 [INFO] main: [模擬 22:30] 市民大道四段 等級變化: B → A
+07:05:18 [INFO] main: [模擬 22:30] 仁愛路四段 等級變化: normal → B
+07:05:18 [INFO] main: [模擬 22:30] 敦化南路一段 等級變化: B → A
+07:05:18 [INFO] main: [模擬 22:30] 松高路 等級變化: normal → B
+07:05:18 [INFO] main: [模擬 22:30] 松壽路 等級變化: normal → B
+07:05:18 [INFO] main: [模擬 22:30] 敦化南路二段 等級變化: normal → B
+07:05:18 [INFO] main: [模擬 22:30] 信義路五段 等級變化: normal → B
+07:05:18 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:18 [WARNING] src.orchestrator: [路線監測] TPE_2026_ACC_001 已無可替補路段（no_feasible_route=False、全數飽和=True）；主線=RD_TPE_004、次線=RD_TPE_005 為權宜指派
+07:05:18 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（both）：{'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}
+07:05:19 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:20 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:21 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:22 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:23 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:24 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:25 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:26 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:27 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:27 [INFO] src.orchestrator: [建議書補寫] TPE_2026_ACC_001 建議書與簡訊已更新
+07:05:28 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:29 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:30 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:31 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:32 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:05:33 [INFO] main: [模擬 22:45] 基隆路地下道 等級變化: B → A
+07:05:33 [INFO] main: [模擬 22:45] 松智路 等級變化: normal → B
+07:05:33 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:33 [WARNING] src.orchestrator: [路線監測] TPE_2026_ACC_001 已無可替補路段（no_feasible_route=False、全數飽和=True）；主線=RD_TPE_004、次線=RD_TPE_005 為權宜指派
+07:05:33 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（both）：{'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}
+07:05:34 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:35 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:36 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:37 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:38 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:39 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:40 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:42 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:42 [INFO] src.orchestrator: [建議書補寫] TPE_2026_ACC_001 建議書與簡訊已更新
+07:05:43 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:05:44 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+INFO:     127.0.0.1:60568 - "WebSocket /ws" [accepted]
+INFO:     connection open
+07:06:33 [INFO] main: [模擬 21:14] 忠孝東路四段 等級變化: normal → B
+07:06:33 [INFO] main: [模擬 21:14] 光復南路 等級變化: normal → B
+07:06:33 [INFO] main: [模擬 21:14] 基隆路一段 等級變化: normal → B
+07:06:34 [INFO] main: [模擬 21:57] 忠孝東路四段 等級變化: B → A
+07:06:34 [INFO] main: [模擬 21:57] 光復南路 等級變化: B → A
+07:06:34 [INFO] main: [模擬 21:57] 基隆路一段 等級變化: B → A
+07:06:34 [INFO] main: [模擬 21:57] 延吉街 等級變化: A → B
+07:06:39 [INFO] main: [評估時刻] 事件 TPE_2026_EVT_005 使用 2026-05-20 22:01（來源：simulation）
+07:06:41 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_EVT_005）: RAG_SEARCH → CALC_ETE → FORMAT_REPORT
+07:06:50 [INFO] src.orchestrator: [建議書生成] TPE_2026_EVT_005 建議書與決策說明已補上
+07:07:03 [INFO] main: [模擬 21:02] 忠孝東路四段 等級變化: normal → B
+07:07:03 [INFO] main: [模擬 21:02] 光復南路 等級變化: normal → B
+07:07:03 [INFO] main: [模擬 21:02] 基隆路一段 等級變化: normal → B
+07:07:05 [INFO] main: [模擬 21:53] 忠孝東路四段 等級變化: B → A
+07:07:05 [INFO] main: [模擬 21:53] 光復南路 等級變化: B → A
+07:07:05 [INFO] main: [模擬 21:53] 基隆路一段 等級變化: B → A
+07:07:05 [INFO] main: [模擬 21:53] 延吉街 等級變化: normal → B
+07:07:27 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:07:27 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:07:27 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:07:27 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:07:35 [INFO] main: [模擬 21:26] 忠孝東路四段 等級變化: A → B
+07:07:35 [INFO] main: [模擬 21:26] 光復南路 等級變化: A → B
+07:07:35 [INFO] main: [模擬 21:26] 基隆路一段 等級變化: A → B
+07:07:39 [INFO] main: [模擬 22:01] 忠孝東路四段 等級變化: B → A
+07:07:39 [INFO] main: [模擬 22:01] 光復南路 等級變化: B → A
+07:07:39 [INFO] main: [模擬 22:01] 基隆路一段 等級變化: B → A
+07:07:41 [INFO] main: [模擬 21:34] 基隆路一段 等級變化: A → B
+07:07:43 [INFO] main: [模擬 22:01] 基隆路一段 等級變化: B → A
+07:07:55 [INFO] main: [評估時刻] 事件 TPE_2026_ACC_001 使用 2026-05-20 22:10（來源：simulation）
+07:07:58 [INFO] src.agent.a2_orchestrator_agent: A2 規劃完成（TPE_2026_ACC_001）: RAG_SEARCH → GRAPH_BUILD → UPSTREAM_JUDGE → CANDIDATE_FILTER → ROUTE_SELECT → CALC_ETE → FORMAT_REPORT
+07:08:02 [INFO] main: [模擬 22:15] 市民大道四段 等級變化: normal → B
+07:08:02 [INFO] main: [模擬 22:15] 敦化南路一段 等級變化: normal → B
+07:08:02 [INFO] main: [模擬 22:15] 延吉街 等級變化: normal → A
+07:08:02 [INFO] main: [模擬 22:15] 基隆路地下道 等級變化: normal → B
+07:08:02 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:02 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（primary）：{'RD_TPE_004': 'SATURATED_0.85'}
+07:08:08 [INFO] src.orchestrator: [建議書生成] TPE_2026_ACC_001 建議書與決策說明已補上
+07:08:09 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:10 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:11 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:12 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:13 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:14 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:15 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:16 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.85'}，執行重規劃
+07:08:17 [INFO] main: [模擬 22:30] 市民大道四段 等級變化: B → A
+07:08:17 [INFO] main: [模擬 22:30] 仁愛路四段 等級變化: normal → B
+07:08:17 [INFO] main: [模擬 22:30] 敦化南路一段 等級變化: B → A
+07:08:17 [INFO] main: [模擬 22:30] 松高路 等級變化: normal → B
+07:08:17 [INFO] main: [模擬 22:30] 松壽路 等級變化: normal → B
+07:08:17 [INFO] main: [模擬 22:30] 敦化南路二段 等級變化: normal → B
+07:08:17 [INFO] main: [模擬 22:30] 信義路五段 等級變化: normal → B
+07:08:17 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:17 [WARNING] src.orchestrator: [路線監測] TPE_2026_ACC_001 已無可替補路段（no_feasible_route=False、全數飽和=True）；主線=RD_TPE_004、次線=RD_TPE_005 為權宜指派
+07:08:17 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（both）：{'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}
+07:08:18 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:19 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:20 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:21 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:23 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:24 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:25 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:26 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:26 [INFO] src.orchestrator: [建議書補寫] TPE_2026_ACC_001 建議書與簡訊已更新
+07:08:27 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:28 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:29 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:30 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:31 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:32 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.95', 'RD_TPE_005': 'SATURATED_0.85'}，執行重規劃
+07:08:33 [INFO] main: [模擬 22:45] 基隆路地下道 等級變化: B → A
+07:08:33 [INFO] main: [模擬 22:45] 松智路 等級變化: normal → B
+07:08:33 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:33 [WARNING] src.orchestrator: [路線監測] TPE_2026_ACC_001 已無可替補路段（no_feasible_route=False、全數飽和=True）；主線=RD_TPE_004、次線=RD_TPE_005 為權宜指派
+07:08:33 [INFO] main: [路線監測] 事件 TPE_2026_ACC_001 路線失效（both）：{'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}
+07:08:34 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:35 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:36 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:37 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:38 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:39 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:40 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:41 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:42 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:42 [INFO] src.orchestrator: [建議書補寫] TPE_2026_ACC_001 建議書與簡訊已更新
+07:08:43 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:44 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:45 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:46 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:47 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:48 [INFO] main: [模擬 23:00] 忠孝東路四段 等級變化: A → B
+07:08:48 [INFO] main: [模擬 23:00] 光復南路 等級變化: A → B
+07:08:48 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:49 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:50 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:51 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:52 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+07:08:53 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃

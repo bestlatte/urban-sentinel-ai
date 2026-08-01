@@ -12,7 +12,6 @@ from __future__ import annotations
 
 
 
-import contextlib
 import logging
 import os
 from datetime import datetime, timezone, timedelta
@@ -191,36 +190,23 @@ _simulation_state = {
     "last_level": None,    # 上一次的等級，用於偵測變化
 }
 
-_decision_in_flight = 0
-"""正在跑的決策週期數。大於 0 時模擬時鐘暫停前進。
-
-[2026-08-02] 沒有這道閘門的話，模擬時間會在決策生成期間跑掉一大段：
-
-    22:10 注入事件 → handle_incident() 開始
-          plan_routes 用 as_of=22:10 → 主線市民大道四段(0.78)
-          C1 建議書生成 ~20 秒（LLM）
-    ← 這 20 秒內 tick loop 照跑，speed=60 → **模擬時間前進 20 分鐘**
-    22:30 decision_result 才寫進 active_incidents
-
-結果是 22:15（市民大道四段剛飽和、仁愛路四段還空著）那一刻沒有任何決策可以
-重規劃——第一次路線更新就這樣消失了，而系統下一次看到路況已經是兩條都飽和。
-使用者看到的「只更新一次、而且新舊路線相同」正是這樣來的。
-
-決策本身是幾百毫秒的確定性運算 + 十幾秒的 LLM 敘述；讓模擬時鐘等它，
-換來的是「事件在哪一分鐘發生，就用那一分鐘的路況決策」這個因果一致性。
-真實時間（非模擬）不受影響——這個計數器只有 tick loop 會讀。
-"""
-
-
-@contextlib.contextmanager
-def _hold_simulation_clock():
-    """決策週期進行中暫停模擬時鐘；離開時恢復（例外也會恢復）。"""
-    global _decision_in_flight
-    _decision_in_flight += 1
-    try:
-        yield
-    finally:
-        _decision_in_flight -= 1
+# [2026-08-02 移除 `_decision_in_flight` 與 `_hold_simulation_clock()`]
+# --------------------------------------------------------------------
+# 這道閘門原本在決策週期進行中暫停模擬時鐘，目的是「事件在哪一分鐘發生，
+# 就用那一分鐘的路況決策」。它解決的真正問題其實是另一件事：建議書生成的
+# 那 20~30 秒裡，`decision_result` 還是 None，而當時的路線監測是**邊緣觸發**的
+# ——那一刻的飽和事件被 `continue` 丟掉之後就永遠不會再被檢查。
+#
+# 兩件事後來都各自處理掉了：
+#
+#   1. 監測改成狀態觸發（每個模擬分鐘都檢查），決策還沒好只是「這一分鐘先跳過」，
+#      下一分鐘會再試，不再是永久丟棄。
+#   2. `handle_incident(defer_narrative=True)` 把兩段 LLM 敘述移出關鍵路徑，
+#      確定性部分 0.3 秒就回來了。
+#
+# 而路線規劃本來就用 `event.timestamp`（注入當下釘住的值）當 as-of，
+# 時鐘後來走到哪裡都不影響那份決策的正確性。閘門於是只剩下「畫面上的時鐘
+# 停住三十幾秒」這一個效果——那正是使用者要我拿掉的。
 
 
 @app.on_event("startup")
@@ -242,11 +228,6 @@ async def _simulation_tick_loop() -> None:
         await asyncio.sleep(1)  # 每 1 秒 tick
         
         if not _simulation_state["enabled"] or not _simulation_state["playing"]:
-            continue
-
-        # 決策週期進行中就不推進時鐘——理由見 `_decision_in_flight` 的說明。
-        # 只是「暫停」不是「丟棄」：決策一結束，下一秒就從原本的時間繼續跑。
-        if _decision_in_flight > 0:
             continue
 
         if not _simulation_state["current_time"]:
@@ -415,17 +396,18 @@ def _affected_route_type(routes, invalid_reasons: dict) -> str | None:
 
 
 async def _broadcast_replan_progress(event_id: str, as_of: datetime, phase: str) -> None:
-    """路線重規劃的進度事件，沿用前端既有的 `decision.task_update.v1` 進度條。
+    """建議書背景補寫的進度事件，沿用前端既有的 `decision.task_update.v1` 進度條。
 
     `eta_seconds` 是實測的建議書生成時間（見 orchestrator 的 `_TASK_ETA_SECONDS`）。
-    這段期間模擬時鐘不會前進，有這條進度使用者才知道系統在忙而不是當掉。
+    這段期間模擬時鐘**照常前進**（建議書已經移出關鍵路徑），進度條只是讓
+    使用者知道報告區塊為什麼還是舊的。
     """
     record = orchestrator.get_global_state().active_incidents.get(event_id)
     payload = {
         "trace_id": record.trace_id if record else event_id,
         "dispatch_seq": (record.route_replan_count + 1) if record else 1,
         "status": "report_started" if phase == "started" else "report_done",
-        "label": "路線重規劃・更新交控建議書" if phase == "started" else "交控建議書已更新",
+        "label": "路線已更新・重寫交控建議書" if phase == "started" else "交控建議書已更新",
         "event_id": event_id,
         "sim_time": as_of.isoformat(),
     }
@@ -438,6 +420,141 @@ async def _broadcast_replan_progress(event_id: str, as_of: datetime, phase: str)
         })
     except Exception:  # noqa: BLE001 - 推播失敗不該影響重規劃本身
         pass
+
+
+_report_tasks: dict[str, object] = {}
+"""event_id → 正在背景補建議書的 asyncio.Task。
+
+同一起事件同時只跑一個：LLM 呼叫要錢也要時間，而且兩份併發生成的結果
+寫回順序無法保證，後寫的可能反而是舊的。
+"""
+
+_MAX_REPORT_CATCHUP_ROUNDS = 3
+"""背景補建議書最多追幾輪。
+
+補寫要 20 秒，這期間路況可能又變、又重規劃了一次，那份建議書一寫回就是舊的
+（`regenerate_report_for()` 會擋下並回 None）。這時要再補一次讓文字追上路線，
+但不能無限追下去——路況持續惡化時每 15 分鐘就會變一次，追不完。
+超過上限就停手，報告區塊維持「更新中」，下一次重規劃會再觸發。
+"""
+
+
+def _schedule_incident_narrative(event_id: str) -> None:
+    """初次決策的建議書與決策說明，丟到背景生成。
+
+    [2026-08-02] 跟 `_schedule_report_regeneration()` 是同一個思路，差別在這裡是
+    **從無到有**而不是重寫。注入事件時整個週期裡：
+
+        路線 + ETE + 風險推演（確定性）  約 0.3 秒  ← 畫面上該立刻出現的全在這
+        建議書生成（LLM）               最多 30 秒
+        決策說明（LLM）                 約 5~10 秒
+
+    以前這三段一起 await，而且外面還包著 `_hold_simulation_clock()`，
+    所以注入一次事件模擬時鐘就停三十幾秒。
+    """
+    import asyncio
+
+    existing = _report_tasks.get(event_id)
+    if existing is not None and not existing.done():
+        return
+    _report_tasks[event_id] = asyncio.create_task(_generate_narrative_bg(event_id))
+
+
+async def _generate_narrative_bg(event_id: str) -> None:
+    """背景生成初次建議書＋決策說明，完成後推播。"""
+    import asyncio
+
+    sim_now = clock.now()
+    await _broadcast_replan_progress(event_id, sim_now, "started")
+    try:
+        decision = await asyncio.to_thread(orchestrator.generate_incident_narrative, event_id)
+        if decision is None:
+            return
+        await ws_manager.broadcast({
+            "message_type": "report.updated.v1",
+            "payload": {
+                "event_id": event_id,
+                "replan_count": orchestrator.get_replan_count(event_id),
+                "control_center_report": decision.control_center_report,
+                "notifications": (
+                    decision.notifications.model_dump(mode="json")
+                    if decision.notifications else None
+                ),
+            },
+        })
+        await ws_manager.broadcast({
+            "message_type": "decision.completed.v1",
+            "payload": decision.model_dump(mode="json"),
+        })
+    except Exception:  # noqa: BLE001
+        logger.exception(f"[建議書生成] {event_id} 背景任務失敗")
+    finally:
+        await _broadcast_replan_progress(event_id, sim_now, "done")
+
+
+def _schedule_report_regeneration(event_id: str, as_of: datetime) -> None:
+    """把建議書重寫丟到背景，不擋模擬 tick loop。
+
+    [2026-08-02] 這是「路線重規劃時模擬時鐘會停住」的解法。
+    在此之前 `check_and_replan_routes()` 把路線重算（毫秒）與建議書重寫
+    （LLM 約 20 秒）綁在一起，而 tick loop 會 await 整包——時鐘就停 20 秒。
+
+    現在拆成兩段：路線立刻套用並推播（使用者立刻看到新路線與警示），
+    建議書在這裡背景補，補完再推一次 `report.updated.v1`。
+    """
+    import asyncio
+
+    existing = _report_tasks.get(event_id)
+    if existing is not None and not existing.done():
+        # 已經有一份在補了。它結束時會自己確認有沒有被更新的重規劃取代，
+        # 需要的話再補一輪（見 _regenerate_report_bg 的迴圈）。
+        return
+
+    _report_tasks[event_id] = asyncio.create_task(_regenerate_report_bg(event_id, as_of))
+
+
+async def _regenerate_report_bg(event_id: str, as_of: datetime) -> None:
+    """背景補建議書，補完推播。失敗只是報告維持舊版，不影響已經更新的路線。"""
+    import asyncio
+
+    await _broadcast_replan_progress(event_id, as_of, "started")
+    try:
+        for _ in range(_MAX_REPORT_CATCHUP_ROUNDS):
+            target = orchestrator.get_replan_count(event_id)
+            if target < 0:
+                return  # 事件已被解除
+
+            decision = await asyncio.to_thread(
+                orchestrator.regenerate_report_for, event_id, target
+            )
+
+            if decision is not None:
+                await ws_manager.broadcast({
+                    "message_type": "report.updated.v1",
+                    "payload": {
+                        "event_id": event_id,
+                        "replan_count": target,
+                        "control_center_report": decision.control_center_report,
+                        "notifications": (
+                            decision.notifications.model_dump(mode="json")
+                            if decision.notifications else None
+                        ),
+                    },
+                })
+                await ws_manager.broadcast({
+                    "message_type": "decision.completed.v1",
+                    "payload": decision.model_dump(mode="json"),
+                })
+
+            # 生成期間沒有新的重規劃就收工；有的話再追一輪讓文字對上路線
+            if orchestrator.get_replan_count(event_id) == target:
+                return
+            logger.info(f"[建議書補寫] {event_id} 生成期間路線又變了，再補一輪")
+        logger.info(f"[建議書補寫] {event_id} 已達追趕上限，等下一次重規劃再更新")
+    except Exception:  # noqa: BLE001
+        logger.exception(f"[建議書補寫] {event_id} 背景任務失敗")
+    finally:
+        await _broadcast_replan_progress(event_id, as_of, "done")
 
 
 async def _monitor_active_routes(as_of: datetime, bundle) -> None:
@@ -462,25 +579,19 @@ async def _monitor_active_routes(as_of: datetime, bundle) -> None:
         old_routes = record.decision_result.routes
 
         # 先問再做：路線還有效就不必付出重規劃的代價（毫秒級查表）。
-        #
-        # [2026-08-02] 這一步不只是省時間，更是為了讓「時間當一下」有交代。
-        # 重規劃成功時會重新生成建議書（LLM ~20 秒），而本函式是在模擬 tick
-        # 迴圈裡被 await 的——那 20 秒模擬時鐘完全不動，使用者看到的就是畫面
-        # 卡住。先預判、再推一則帶 eta 的進度事件，卡住的那段就有進度條可看，
-        # 而不是無聲無息地停在某一分鐘。
         needs = await asyncio.to_thread(
             orchestrator.route_replan_needed, event_id, as_of, bundle
         )
         if not needs:
             continue
 
-        await _broadcast_replan_progress(event_id, as_of, "started")
-        try:
-            result = await asyncio.to_thread(
-                orchestrator.check_and_replan_routes, event_id, as_of
-            )
-        finally:
-            await _broadcast_replan_progress(event_id, as_of, "done")
+        # 路線重算是毫秒級的（純確定性），建議書重寫才是那 20 秒的 LLM 呼叫。
+        # `regenerate_report=False` 讓這裡只做前者——模擬時鐘幾乎感覺不到停頓，
+        # 地圖、路線面板、「無路可替補」警示立刻就更新。
+        result = await asyncio.to_thread(
+            orchestrator.check_and_replan_routes, event_id, as_of,
+            regenerate_report=False, bundle=bundle,
+        )
 
         if result and result.replanned:
             affected_route_type = _affected_route_type(old_routes, result.invalid_reasons)
@@ -513,11 +624,18 @@ async def _monitor_active_routes(as_of: datetime, bundle) -> None:
                     "invalid_reasons": result.invalid_reasons,
                     "replan_count": record.route_replan_count,
                     "time": as_of.isoformat(),
-                    # 新增：更新後的報告內容
+                    # 建議書還在背景重寫中。這裡帶的是**上一版**的文字——
+                    # 空著會讓報告區塊整塊消失，比一份標示「更新中」的舊報告更難理解。
+                    # 補寫完成後會另外推一則 report.updated.v1 換掉它。
+                    "report_pending": result.report_pending,
                     "control_center_report": new_decision.control_center_report if new_decision else None,
                     "notifications": new_decision.notifications.model_dump(mode="json") if new_decision and new_decision.notifications else None,
                 },
             })
+
+            # 建議書丟到背景補，不擋 tick loop——模擬時鐘照常前進
+            if result.report_pending:
+                _schedule_report_regeneration(event_id, as_of)
 
             # 已無可替補路段時，額外推一則最高等級警報。routes.updated.v1 是
             # 「路線面板」的更新事件，這一則走的是警報通道——指揮官不會因為
@@ -823,11 +941,14 @@ async def evaluate_incident(body: dict):
         "payload": {"triggered_by": [event_id]},
     })
 
-    # 決策期間（含 ~20 秒的建議書生成）暫停模擬時鐘，確保路網規劃用的是
-    # 事件實際發生的那一分鐘的路況，而不是生成結束後已經跑掉 20 分鐘的路況。
-    with _hold_simulation_clock():
-        decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
+    # 決策的確定性部分（路線、ETE、風險推演）約 0.3 秒就跑完，建議書與決策說明
+    # 才是那三十幾秒的 LLM。`defer_narrative=True` 讓這裡只等前者，模擬時鐘
+    # 幾乎感覺不到停頓；文字敘述由下面的背景任務補上。
+    decision_result = await orchestrator.handle_incident(
+        incident, ws_broadcaster=ws_manager.broadcast, defer_narrative=True
+    )
     payload_json = decision_result.model_dump(mode="json")
+    payload_json["report_pending"] = True
 
     # 廣播 decision.alert.v1（所有事件注入都發送警報）
     # severity 用於顯示事件嚴重度，level 用於顯示交通應變等級
@@ -877,6 +998,10 @@ async def evaluate_incident(body: dict):
         "message_type": "decision.completed.v1",
         "payload": payload_json,
     })
+
+    # 建議書與決策說明丟到背景補，不擋這個請求也不擋模擬時鐘。
+    # 補完會推 report.updated.v1 換掉「生成中」的佔位。
+    _schedule_incident_narrative(incident.event_id)
 
     # 廣播 dashboard.updated.v1（決策完成後現況變動）
     await ws_manager.broadcast({
@@ -1788,10 +1913,13 @@ async def generate_incident():
         "payload": {"triggered_by": [event_id]},
     })
 
-    # 執行決策流程（同上：決策期間暫停模擬時鐘）
-    with _hold_simulation_clock():
-        decision_result = await orchestrator.handle_incident(incident, ws_broadcaster=ws_manager.broadcast)
+    # 執行決策流程（同上：只等確定性部分，建議書與決策說明背景補）
+    decision_result = await orchestrator.handle_incident(
+        incident, ws_broadcaster=ws_manager.broadcast, defer_narrative=True
+    )
     payload_json = decision_result.model_dump(mode="json")
+    payload_json["report_pending"] = True
+    _schedule_incident_narrative(incident.event_id)
 
     # 廣播警報
     await ws_manager.broadcast({
