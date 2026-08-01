@@ -144,6 +144,11 @@ function handleServerMessage(msg) {
       if (typeof onRoutesUpdated === "function") onRoutesUpdated(payload);
       break;
 
+    // ===== 事件解除推播 =====
+    case "incident.resolved.v1":
+      if (typeof onIncidentResolved === "function") onIncidentResolved(payload);
+      break;
+
     default:
       console.log("[WS] 未處理的 message_type:", type);
   }

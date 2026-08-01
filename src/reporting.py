@@ -151,10 +151,36 @@ def _generate_c1_c3_fallback(
     route_plan: RoutePlan | None,
     ete: EteEstimate,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> str:
-    """USE_BEDROCK=false 保底模板：用固定格式組裝建議書，不呼叫 LLM。"""
+    """USE_BEDROCK=false 保底模板：用固定格式組裝建議書，不呼叫 LLM。
+    
+    [2026-08-01新增] merged_incident_info：同路段多事件合併時顯示所有事件資訊。
+    """
     parts = []
-    parts.append(f"【交控建議書】事件 {incident.event_id}")
+    
+    # ★ 情境1：同路段多事件合併報告
+    if merged_incident_info and merged_incident_info.get("count", 0) > 1:
+        parts.append("═" * 50)
+        parts.append("【⚠️ 同路段多事件合併交控建議書】")
+        parts.append("═" * 50)
+        parts.append(f"合併事件數量：{merged_incident_info['count']} 件")
+        parts.append(f"合併事件ID：{', '.join(merged_incident_info['event_ids'])}")
+        parts.append("")
+        parts.append("【各事件詳情】")
+        for i, (eid, desc) in enumerate(zip(merged_incident_info['event_ids'], merged_incident_info.get('descriptions', [])), 1):
+            parts.append(f"  {i}. {eid}: {desc}")
+        parts.append("")
+        parts.append("【ETE 合併計算說明】")
+        parts.append(f"  • 各事件最大 ETE：{merged_incident_info['max_ete_minutes']} 分鐘")
+        parts.append(f"  • 多事件協調延遲：+{(merged_incident_info['count'] - 1) * 15} 分鐘")
+        parts.append(f"    （每多一事件增加 15 分鐘協調時間）")
+        parts.append(f"  • 合併後總 ETE：{merged_incident_info['merged_ete_minutes']} 分鐘")
+        parts.append("─" * 50)
+        parts.append("")
+    else:
+        parts.append(f"【交控建議書】事件 {incident.event_id}")
+    
     parts.append(f"事件描述：{incident.description}（{incident.location}）")
     parts.append(f"命中條款：{', '.join(sorted({h.clause_id for h in sensing.rule_hits}))}")
     parts.append(f"交通分級：{sensing.traffic_level} 級")
@@ -389,6 +415,7 @@ def generate_report(
     ete: EteEstimate,
     advisory: BedrockAdvisory | None,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> tuple[str | None, Notification | None]:
     """C1-C4：LLM 生成，唯讀轉換——只能表達已經算好的事實，不得改寫任何數字/路段/條款編號。
 
@@ -397,6 +424,16 @@ def generate_report(
 
     [2026-07-28架構複查新增] `bundle` 參數：SOP-5 的警力人數需要
     `routing.count_affected_intersections()` 算受影響路口數，見 `_generate_c1_c3_fallback`。
+    
+    [2026-08-01新增] `merged_incident_info` 參數：同路段多事件時，報告書需要明確列出
+    所有合併的事件及 ETE 計算方式。格式：
+    {
+        "event_ids": [...],
+        "count": int,
+        "max_ete_minutes": int,
+        "merged_ete_minutes": int,
+        "descriptions": [...],
+    }
     """
     import os
     import logging
@@ -410,7 +447,7 @@ def generate_report(
     report_text: str | None = None
     try:
         if use_bedrock:
-            report_text = _generate_with_llm(incident, sensing, route_plan, ete, bundle)
+            report_text = _generate_with_llm(incident, sensing, route_plan, ete, bundle, merged_incident_info)
     except Exception as e:
         logger.warning(f"Bedrock LLM 報告生成失敗，降級為保底模板: {e}")
         report_text = None
@@ -418,7 +455,7 @@ def generate_report(
     # Bedrock 失敗或 USE_BEDROCK=false 時使用保底模板
     if report_text is None:
         try:
-            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle)
+            report_text = _generate_c1_c3_fallback(incident, sensing, route_plan, ete, bundle, merged_incident_info)
         except Exception as e:
             logger.error(f"保底模板生成也失敗: {e}")
             report_text = None
@@ -475,10 +512,24 @@ def _generate_with_llm(
     route_plan: RoutePlan | None,
     ete: EteEstimate,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> str:
     """使用 Bedrock LLM 生成 C1-C3 建議書。"""
     system_prompt = _load_prompt("report.txt")
     facts_block = _build_facts_block(incident, sensing, route_plan, ete, bundle)
+    
+    # 如果有合併事件，加入合併資訊
+    if merged_incident_info and merged_incident_info.get("count", 0) > 1:
+        merged_block = (
+            f"\n\n【同路段多事件合併資訊】\n"
+            f"合併事件數量: {merged_incident_info['count']} 件\n"
+            f"合併事件ID: {', '.join(merged_incident_info['event_ids'])}\n"
+            f"各事件最大 ETE: {merged_incident_info['max_ete_minutes']} 分鐘\n"
+            f"合併後總 ETE: {merged_incident_info['merged_ete_minutes']} 分鐘\n"
+            f"（計算方式: max(各事件ETE) + (事件數-1)×15分鐘）"
+        )
+        facts_block += merged_block
+    
     user_message = f"請根據以下事實資料生成交控建議書（含號誌調整與聯動建議）：\n\n{facts_block}"
 
     return _invoke_bedrock_converse(system_prompt, user_message)

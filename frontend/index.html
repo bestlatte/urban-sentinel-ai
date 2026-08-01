@@ -36,6 +36,10 @@
         <span class="page-nav-icon">📋</span>
         <span class="page-nav-label">Activity Log</span>
       </button>
+      <button class="page-nav-btn" data-page="reports" onclick="switchPage('reports')">
+        <span class="page-nav-icon">📄</span>
+        <span class="page-nav-label">Reports</span>
+      </button>
     </nav>
     <div class="header-right">
       <div class="header-indicator">
@@ -158,6 +162,29 @@
           <div class="saturation-empty">目前無飽和路段</div>
         </div>
       </aside>
+    </div>
+  </div>
+
+  <!-- Page: Reports (事件報告全覽) -->
+  <div class="page-content" id="page-reports" hidden>
+    <div class="reports-page-layout">
+      <!-- 左側：事件列表 -->
+      <aside class="reports-sidebar">
+        <div class="reports-sidebar-header">事件報告列表</div>
+        <div class="reports-event-list" id="reports-event-list">
+          <div class="reports-empty">尚無事件報告</div>
+        </div>
+      </aside>
+      <!-- 右側：報告詳情 -->
+      <main class="reports-main">
+        <div class="reports-main-header" id="reports-main-header">選擇事件查看報告</div>
+        <div class="reports-detail-content" id="reports-detail-content">
+          <div class="reports-placeholder">
+            <div class="reports-placeholder-icon">📄</div>
+            <div class="reports-placeholder-text">從左側選擇事件以查看完整報告</div>
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 
