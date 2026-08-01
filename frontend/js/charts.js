@@ -3,6 +3,8 @@
 let trafficChart = null;
 let rawTrafficFlowData = null;
 let rawTrafficFlowPromise = null;
+let roadTopologyData = null;
+let roadTopologyPromise = null;
 
 function replaceTrafficChart(config) {
   const canvas = document.getElementById("traffic-chart");
@@ -119,6 +121,32 @@ async function loadRawTrafficFlowData() {
   return rawTrafficFlowPromise;
 }
 
+async function loadRoadTopologyData() {
+  if (roadTopologyData) return roadTopologyData;
+  if (!roadTopologyPromise) {
+    roadTopologyPromise = fetch("/data/road_network_topology.json")
+      .then((response) => {
+        if (!response.ok) throw new Error(`Road topology HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((roads) => {
+        roadTopologyData = Array.isArray(roads) ? roads : [];
+        return roadTopologyData;
+      })
+      .catch((error) => {
+        roadTopologyPromise = null;
+        throw error;
+      });
+  }
+  return roadTopologyPromise;
+}
+
+function getIncidentRoadId(incident) {
+  if (String(incident?.affected_road || "").startsWith("RD_")) return incident.affected_road;
+  if (String(incident?.affected_segment || "").startsWith("RD_")) return incident.affected_segment;
+  return null;
+}
+
 function parseTrafficTimestamp(value) {
   if (!value) return null;
   const parsed = new Date(String(value).replace(" ", "T"));
@@ -134,11 +162,25 @@ async function updateTrafficChartForIncident(decision) {
   if (!trafficChart || !decision?.incident) return;
 
   try {
-    const rows = await loadRawTrafficFlowData();
+    const [rows, topology] = await Promise.all([
+      loadRawTrafficFlowData(),
+      loadRoadTopologyData(),
+    ]);
     if (!rows.length) return;
 
+    const incidentRoadId = getIncidentRoadId(decision.incident);
+    const incidentRoad = topology.find((road) => road.segment_id === incidentRoadId);
+    const relatedRoadIds = new Set([
+      incidentRoadId,
+      ...(incidentRoad?.alternatives || []),
+    ].filter(Boolean));
+    if (!relatedRoadIds.size) return;
+
     const incidentTime = parseTrafficTimestamp(decision.incident.timestamp);
-    const availableTimes = [...new Set(rows.map((row) => row.Timestamp).filter(Boolean))];
+    const availableTimes = [...new Set(rows
+      .filter((row) => relatedRoadIds.has(row.Segment_ID))
+      .map((row) => row.Timestamp)
+      .filter(Boolean))];
     let selectedTime = availableTimes[availableTimes.length - 1];
     if (incidentTime && availableTimes.length) {
       selectedTime = availableTimes.reduce((closest, candidate) => {
@@ -151,14 +193,18 @@ async function updateTrafficChartForIncident(decision) {
     }
 
     const snapshot = rows
-      .filter((row) => row.Timestamp === selectedTime)
-      .sort((a, b) => String(a.Segment_ID).localeCompare(String(b.Segment_ID)));
+      .filter((row) => row.Timestamp === selectedTime && relatedRoadIds.has(row.Segment_ID))
+      .sort((a, b) => {
+        if (a.Segment_ID === incidentRoadId) return -1;
+        if (b.Segment_ID === incidentRoadId) return 1;
+        return String(a.Segment_ID).localeCompare(String(b.Segment_ID));
+      });
     if (!snapshot.length) return;
 
     const barChart = replaceTrafficChart({
       type: "bar",
       data: {
-        labels: snapshot.map((row) => row.Road_Name || row.Segment_ID),
+        labels: snapshot.map((row) => `${row.Road_Name || row.Segment_ID}${row.Segment_ID === incidentRoadId ? "（事件）" : "（相鄰）"}`),
         datasets: [
       {
         label: "Avg Speed (km/h)",
@@ -197,7 +243,9 @@ async function updateTrafficChartForIncident(decision) {
           callbacks: {
             title(items) {
               const row = snapshot[items[0]?.dataIndex];
-              return row ? `${row.Road_Name} · ${row.Segment_ID}` : "";
+              if (!row) return "";
+              const relation = row.Segment_ID === incidentRoadId ? "事件路段" : "相鄰受影響路段";
+              return `${row.Road_Name} · ${row.Segment_ID} · ${relation}`;
             },
             afterBody(items) {
               const row = snapshot[items[0]?.dataIndex];
@@ -231,7 +279,7 @@ async function updateTrafficChartForIncident(decision) {
     if (!barChart) return;
 
     const eventId = decision.incident.event_id || "事件";
-    setTrafficChartHeader(`Traffic Flow · ${eventId} · ${selectedTime?.slice(11, 16) || ""}`);
+    setTrafficChartHeader(`Traffic Flow · ${eventId} · 事件與相鄰路段 · ${selectedTime?.slice(11, 16) || ""}`);
     barChart.update();
   } catch (error) {
     console.warn("事件 Traffic Flow 長條圖載入失敗:", error);
