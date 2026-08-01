@@ -973,6 +973,35 @@ def _get_data_time_range():
     return min(all_times), max(all_times)
 
 
+_SIM_CURSOR_LEAD_MINUTES = 10
+"""模擬器起播位置要落在第一起事件前多久。
+
+留一點前置時間讓使用者看到時鐘在跑、確認模擬器真的在動，然後事件才出現——
+直接從事件時間開始播的話，按下播放就跳出一堆按鈕，反而看不出因果。
+"""
+
+
+def _default_sim_cursor(start_time: datetime) -> datetime:
+    """模擬器按下「啟動」後游標該停在哪裡。
+
+    見 `start_simulation()` 的說明：資料起點（17:00）距離第一起事件（22:00）
+    有 5 小時，從那裡起播會讓事件注入面板空白到讓人以為壞了。
+
+    取不到事件時間就退回資料起點——沒有事件的資料集本來就沒有這個問題。
+    """
+    try:
+        bundle = orchestrator.GATEWAY.load_data()
+        event_times = [i.timestamp for i in bundle.incidents]
+        if not event_times:
+            return start_time
+        cursor = min(event_times) - timedelta(minutes=_SIM_CURSOR_LEAD_MINUTES)
+        # 不得早於資料起點，否則查不到任何 as-of 快照
+        return max(cursor, start_time)
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"計算模擬器起播位置失敗，改用資料起點: {e}")
+        return start_time
+
+
 def get_simulation_time():
     """取得當前模擬時間（供其他模組使用）"""
     if _simulation_state["enabled"] and _simulation_state["current_time"]:
@@ -1266,7 +1295,17 @@ async def start_simulation(body: dict = None):
     _simulation_state["enabled"] = True
     _simulation_state["start_time"] = start_time
     _simulation_state["end_time"] = end_time
-    _simulation_state["current_time"] = start_time
+    # 起始播放位置刻意**不是**資料起點。
+    #
+    # [2026-08-01] 資料從 17:00 開始，但最早的事件在 22:00——中間隔了 5 小時。
+    # 事件注入面板只列出「時間已到」的事件（`GET /api/incidents?as_of=`），
+    # 所以從 17:00 開始播的話，得等 5 小時的模擬時間才會有第一顆按鈕出現：
+    # 預設速度 1 秒 = 1 分鐘，就是真的坐在螢幕前等 5 分鐘，畫面上只有
+    # 「請啟動時間模擬器」。實測就是這樣，看起來像事件注入壞掉了。
+    #
+    # 時間軸範圍仍然是完整的 17:00~23:30（滑桿、圖表都不受影響），
+    # 只有「現在播到哪裡」改成第一起事件前 10 分鐘，按下播放很快就有東西可注入。
+    _simulation_state["current_time"] = _default_sim_cursor(start_time)
     _simulation_state["speed"] = body.get("speed", 60)  # 預設 1 秒跑 1 分鐘
     _simulation_state["playing"] = False
     _simulation_state["last_level"] = None
@@ -1276,18 +1315,22 @@ async def start_simulation(body: dict = None):
     global _last_traffic_level
     _last_traffic_level = None
     
-    # 推播初始狀態
+    # 推播初始狀態。
+    # `current_time` 必須回報**實際游標**而不是 `start_time`——兩者現在不同了
+    # （見上方 `_default_sim_cursor`）。回錯的話前端時鐘顯示 17:00、
+    # 事件列表卻用 21:50 去查，畫面自相矛盾。
+    cursor = _simulation_state["current_time"]
     await ws_manager.broadcast({
         "message_type": "simulation.state.v1",
         "payload": {
             "action": "started",
-            "current_time": start_time.isoformat(),
+            "current_time": cursor.isoformat(),
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
         }
     })
-    
-    return {"status": "ok", "message": "模擬器已啟動", "current_time": start_time.isoformat()}
+
+    return {"status": "ok", "message": "模擬器已啟動", "current_time": cursor.isoformat()}
 
 
 @app.post("/api/simulation/play")

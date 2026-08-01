@@ -156,12 +156,57 @@ def plan_route(request: RouteRequest) -> RoutePlan:
     # 取得事故路段的 alternatives
     alternative_ids = affected_seg.alternatives
 
+    # [2026-08-01 合併修正] 「直接相鄰」該不該當硬排除條件——兩種說法都對一半。
+    #
+    # SOP-2 §2a(2) 明文要求替代路線必須「與事故路段直接相鄰（出現在其
+    # intersections 內）」，ACC_001 的黃金值（主 RD_TPE_004／次 RD_TPE_005）
+    # 就是這條篩選跑出來的。
+    #
+    # 但 branch8 發現一個真問題：15 條路段裡有 **10 條**的 alternatives 全部
+    # 通不過這個篩選（例如 RD_TPE_003 基隆路一段的 alternatives 是
+    # ['RD_TPE_006', ...]，而它的 intersections 是 ['忠孝東路四段','松高路',
+    # '信義路五段']——「敦化南路一段」不在裡面）。結果那 10 條路段一出事就
+    # 直接回「無可行替代路線」。
+    #
+    # 他們的修法是整個移除這道篩選。那修好了 10 條，卻弄壞了 ACC_001：
+    # 敦化南路一段（飽和度 0.72）不再被排除，就贏過市民大道四段（0.78）
+    # 變成主線，跟 SOP 驗收過的黃金值不符。
+    #
+    # 兩邊兼顧的做法：**優先套用篩選，篩不出東西時才放寬**。
+    #   RD_TPE_002 → 篩得到市民大道四段、仁愛路四段 → 黃金值保住
+    #   RD_TPE_003 → 篩完是空的 → 放寬用完整 alternatives → 10 條路段有救
+    # 放寬時會記一筆 finding，讓指揮官知道這些路線不是直接相鄰的。
+    _direct_ok = [
+        a for a in alternative_ids
+        if a in segment_map
+        and a != incident.affected_segment
+        and a != incident.affected_road
+        and segment_map[a].capacity_vph >= 1000
+        and _is_directly_intersecting(segment_map[a].name, affected_seg.intersections)
+    ]
+    require_direct_intersection = bool(_direct_ok)
+
     # R3-R5：逐一評估每個 alternative
     all_candidates: list[RouteCandidate] = []
     upstream_eligible: list[RouteCandidate] = []
     downstream_eligible: list[RouteCandidate] = []
     excluded: list[RouteCandidate] = []
     findings: list[RouteFinding] = []
+
+    if not require_direct_intersection and alternative_ids:
+        # 放寬了才記——指揮官要知道這些路線是路網設計者列的替代方案，
+        # 但不是 SOP-2 §2a(2) 定義的「直接相鄰」路段。
+        findings.append(RouteFinding(
+            finding_code="INTERSECTION_FILTER_RELAXED",
+            segment_ids=list(alternative_ids),
+            evidence={
+                "reason": "此路段的 alternatives 均未列於其 intersections，"
+                          "套用直接相鄰篩選會得到零候選",
+                "affected_segment": affected_seg.segment_id,
+                "intersections": list(affected_seg.intersections or []),
+                "sop_ref": "SOP-2 §2a(2)",
+            },
+        ))
 
     for alt_id in alternative_ids:
         # R3 step 1: ID 存在
@@ -210,7 +255,21 @@ def plan_route(request: RouteRequest) -> RoutePlan:
         # 正確邏輯：alternatives 清單本身就是路網設計者預先驗證過的合理替代路線，
         # 不需要再用 intersections 做二次驗證。移除此檢查，改為記錄「是否直接相交」
         # 作為輔助資訊（影響上下游判定），但不作為排除條件。
+        #
+        # [2026-08-01 合併修正] 上面那段只對了一半——見 `require_direct_intersection`
+        # 的完整說明。這道篩選在有直接相鄰候選時仍必須套用（否則 ACC_001 黃金值
+        # 會壞掉），只有在篩完會是空的時候才放寬。
         is_directly_intersecting = _is_directly_intersecting(seg.name, affected_seg.intersections)
+
+        if require_direct_intersection and not is_directly_intersecting:
+            candidate = RouteCandidate(
+                segment_id=alt_id, name=seg.name, eligible=False,
+                reason_code="NOT_DIRECTLY_INTERSECTING", saturation_score=sat,
+                capacity_vph=seg.capacity_vph, snapshot_at=snapshot_at,
+            )
+            all_candidates.append(candidate)
+            excluded.append(candidate)
+            continue
 
         # R3 step 5: 上下游判定（根據車流方向）
         # [2026-08-01 修正] 現在會讀取 flow_direction 欄位判斷車流方向

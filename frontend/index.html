@@ -151,6 +151,18 @@
           </div>
         </section>
 
+        <!-- Saturated Segments (飽和路段即時監測)
+             [2026-08-01 復原] 這一段在合併 branch8 時被連帶刪掉了，但
+             `map.js::renderDashboardSaturationList()` 與 styles.css 的 17 條樣式
+             規則都還在——JS 有四處呼叫它，每次都因為 `getElementById` 取不到
+             而靜默 return。功能沒有被移除，只是失去了容器。 -->
+        <section class="section card" id="dashboard-saturation-panel">
+          <div class="section-header">Saturated Segments</div>
+          <div class="dashboard-saturation-list" id="dashboard-saturation-list">
+            <div class="saturation-empty">目前無飽和路段</div>
+          </div>
+        </section>
+
         <!-- Advisory Report (擴大區域，原本 F7 的空間也給它) -->
         <section class="section card report-expanded" id="f5-report">
           <div class="section-header section-header-with-btn">

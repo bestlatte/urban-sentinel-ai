@@ -64,9 +64,15 @@ def test_load_data_returns_complete_bundle(bundle: NormalizedDataBundle):
     assert len(bundle.traffic) == 112
     assert len(bundle.crowd) == 36
     assert len(bundle.road_network) == 15
-    assert len(bundle.incidents) == 3
     assert len(bundle.sop) == 7
     assert bundle.loaded_at is not None
+
+    # [2026-08-01] 事件數原本寫死 3。Demo 用的事件會增減（這次合併就從 3 加到 10），
+    # 寫死只會讓每次加事件都得改測試，而且改的人不知道自己在改什麼。
+    # 真正該守的是「三筆黃金事件還在」——所有黃金值驗收都建立在它們身上。
+    golden = {"TPE_2026_ACC_001", "TPE_2026_EVT_002", "TPE_2026_EVT_003"}
+    event_ids = {i.event_id for i in bundle.incidents}
+    assert golden <= event_ids, f"黃金事件缺漏：{golden - event_ids}"
 
 
 def test_crowd_timestamps_have_timezone(bundle: NormalizedDataBundle):
