@@ -113,18 +113,18 @@ function renderMap(container, routes, incidentSegmentId = null) {
     const label = (p.$note || p.segment_id).replace(/，.*/, "").replace(/（.*）/, "");
     const labelColor = isIncident ? "hsl(0,84%,70%)" : "hsl(0,0%,50%)";
     const labelWeight = isIncident ? "font-weight='600'" : "";
-    svg += `<text x="${p.mx}" y="${p.my + r + 14}" text-anchor="middle" fill="${labelColor}" font-size="11" ${labelWeight} font-family="-apple-system,sans-serif">${escapeHtml(label)}</text>`;
+    svg += `<text x="${p.mx}" y="${p.my + r + 16}" text-anchor="middle" fill="${labelColor}" font-size="14" font-weight="500" ${labelWeight} font-family="-apple-system,Noto Sans TC,sans-serif">${escapeHtml(label)}</text>`;
   });
 
   svg += `</svg>`;
 
   // 圖例（加上事件點說明）
-  const legend = `<div style="position:absolute;bottom:12px;right:16px;display:flex;gap:12px;font-size:0.65rem;color:hsl(0,0%,50%)">
-    <span><span style="color:hsl(0,84%,60%)">✕</span> 事件</span>
-    <span><span style="color:hsl(142,71%,45%)">●</span> 主線</span>
-    <span><span style="color:hsl(48,96%,53%)">●</span> 次線</span>
-    <span><span style="color:hsl(0,84%,60%)">●</span> 封閉</span>
-    <span><span style="color:hsl(0,0%,30%)">●</span> 一般</span>
+  const legend = `<div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:18px;font-size:0.82rem;color:var(--text-secondary,#34271D);background:var(--bg-card,#F3E8D7);border:1px solid var(--border,#B78E62);border-radius:8px;padding:8px 20px;font-weight:500;">
+    <span><span style="color:hsl(0,84%,60%);font-size:1rem">✕</span> 事件</span>
+    <span><span style="color:hsl(142,71%,45%);font-size:1rem">●</span> 主線</span>
+    <span><span style="color:hsl(48,96%,53%);font-size:1rem">●</span> 次線</span>
+    <span><span style="color:hsl(0,84%,60%);font-size:1rem">●</span> 封閉</span>
+    <span><span style="color:hsl(0,0%,30%);font-size:1rem">●</span> 一般</span>
   </div>`;
 
   container.innerHTML = svg + legend;
@@ -512,9 +512,9 @@ function renderSaturationMap() {
     
     // 標籤
     const label = (p.$note || p.segment_id).replace(/，.*/, "").replace(/（.*）/, "");
-    svg += `<text x="${p.mx}" y="${p.my + r + 18}" text-anchor="middle" 
-                  fill="hsl(0,0%,65%)" font-size="12" font-weight="500"
-                  font-family="-apple-system,sans-serif">${escapeHtml(label)}</text>`;
+    svg += `<text x="${p.mx}" y="${p.my + r + 20}" text-anchor="middle" 
+                  fill="hsl(0,0%,65%)" font-size="14" font-weight="500"
+                  font-family="-apple-system,Noto Sans TC,sans-serif">${escapeHtml(label)}</text>`;
     
     // 飽和度數字（只顯示有資料的）
     if (satScore !== undefined) {

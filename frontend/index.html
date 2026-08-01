@@ -14,6 +14,12 @@
   <link rel="stylesheet" href="/frontend/css/chat-cards.css" />
   <link rel="stylesheet" href="/frontend/css/chat-input.css" />
   <link rel="stylesheet" href="/frontend/css/chat-loading.css" />
+  <style>
+    #f4-geomap { height: 440px; border-radius: 10px; overflow: hidden; background: #F3E8D7; }
+    .map-tabs button { padding: 5px 14px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; font-size: 0.72rem; font-family: var(--font); cursor: pointer; transition: all 0.15s; }
+    .map-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .map-tabs button:not(.active):hover { background: var(--bg-elevated); color: var(--text); }
+  </style>
 </head>
 <body>
   <!-- Header -->
@@ -77,9 +83,17 @@
           <div class="section-header">Traffic Flow</div>
         </section>
 
-        <!-- Road Network -->
-        <section class="section card" id="f4-map">
-          <div class="section-header">Road Network Topology</div>
+        <!-- Road Network (tabbed view) -->
+        <section class="section card" id="f4-container" style="padding:0;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px 0">
+            <div class="section-header" style="margin-bottom:0">Road Network</div>
+            <div class="map-tabs" style="display:flex;gap:4px">
+              <button class="map-tab active" onclick="switchMapTab('schematic')">Schematic</button>
+              <button class="map-tab" onclick="switchMapTab('geographic')">Geographic</button>
+            </div>
+          </div>
+          <div id="f4-map" style="padding:16px 20px"></div>
+          <div id="f4-geomap" style="display:none"></div>
         </section>
       </div>
 
@@ -264,6 +278,7 @@
   <script src="/frontend/vendor/chart.umd.js"></script>
   <script src="/frontend/js/charts.js?v=traffic-event-bars-2"></script>
   <script src="/frontend/js/map.js"></script>
+  <script src="/frontend/js/geomap.js"></script>
   <script src="/frontend/js/chat-app.js"></script>
   <script src="/frontend/js/app.js?v=traffic-event-bars-2"></script>
 </body>
