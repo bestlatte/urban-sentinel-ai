@@ -8,11 +8,15 @@ async function fetchDashboard() {
   return resp.json();
 }
 
-async function fetchEvaluateIncident(eventId) {
+async function fetchEvaluateIncident(eventId, asOf = null) {
+  const body = { event_id: eventId };
+  if (asOf) {
+    body.as_of = asOf;  // 模擬器模式：用模擬器當前時間做飽和度查詢
+  }
   const resp = await fetch("/api/incidents/evaluate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ event_id: eventId }),
+    body: JSON.stringify(body),
   });
   return resp.json();
 }
@@ -36,8 +40,9 @@ async function fetchHealth() {
   return resp.json();
 }
 
-async function fetchIncidents() {
-  const resp = await fetch("/api/incidents");
+async function fetchIncidents(asOf = null) {
+  const url = asOf ? `/api/incidents?as_of=${encodeURIComponent(asOf)}` : "/api/incidents";
+  const resp = await fetch(url);
   return resp.json();
 }
 

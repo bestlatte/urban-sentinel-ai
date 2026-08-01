@@ -2319,3 +2319,15 @@ body.right-side-nav-collapsed .page-content {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* ===== 事件時間標籤 ===== */
+.incident-time {
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 0.75rem;
+  color: var(--accent);
+  background: rgba(107, 73, 50, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-right: 4px;
+}

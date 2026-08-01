@@ -184,6 +184,21 @@ function onDashboardUpdated(payload) {
 
 function onDecisionCompleted(decision) {
   if (!decision) return;
+  
+  const eventId = decision.incident?.event_id || decision.trace_id;
+  
+  // ★ 判斷是否為 cascade replan 後的更新
+  // 如果 _allDecisions 已有此事件，且 routes 有變化，則視為 replan 更新
+  const existingDecision = eventId ? _allDecisions.get(eventId) : null;
+  const isReplanUpdate = existingDecision && _isRoutesChanged(existingDecision.routes, decision.routes);
+  
+  if (isReplanUpdate) {
+    console.log(`[onDecisionCompleted] 收到 cascade replan 更新: ${eventId}`);
+    // replan 更新：跳過去重檢查，直接更新
+    _handleReplanDecisionUpdate(decision, eventId);
+    return;
+  }
+  
   // 用 trace_id 去重（REST 回應 + WS 推播會各呼叫一次，避免重複計數）
   if (decision.trace_id && _processedTraceIds.has(decision.trace_id)) return;
   if (decision.trace_id) _processedTraceIds.add(decision.trace_id);
@@ -224,6 +239,81 @@ function onDecisionCompleted(decision) {
   
   // 更新 Reports 頁面列表（如果在該頁面）
   _updateReportsOnNewDecision();
+}
+
+// ★ 判斷兩個 routes 是否有變化（用於識別 cascade replan 更新）
+function _isRoutesChanged(oldRoutes, newRoutes) {
+  if (!oldRoutes && !newRoutes) return false;
+  if (!oldRoutes || !newRoutes) return true;
+  
+  const oldPrimary = oldRoutes.primary?.segment_id;
+  const newPrimary = newRoutes.primary?.segment_id;
+  const oldSecondary = oldRoutes.secondary?.segment_id;
+  const newSecondary = newRoutes.secondary?.segment_id;
+  
+  return oldPrimary !== newPrimary || oldSecondary !== newSecondary;
+}
+
+// ★ 處理 cascade replan 後的 decision 更新（不增加事件計數，只更新顯示）
+function _handleReplanDecisionUpdate(decision, eventId) {
+  console.log(`[_handleReplanDecisionUpdate] 更新事件 ${eventId} 的路線`);
+  
+  // 更新 _allDecisions 中的 decision
+  if (eventId && _allDecisions.has(eventId)) {
+    const oldDecision = _allDecisions.get(eventId);
+    // 保留 _routeHistory 等自訂欄位
+    if (oldDecision._routeHistory) {
+      decision._routeHistory = oldDecision._routeHistory;
+    }
+    _allDecisions.set(eventId, decision);
+  }
+  
+  // 更新 F4 路網圖
+  if (decision.routes) {
+    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    console.log(`[_handleReplanDecisionUpdate] 更新地圖，事件路段: ${incidentSegmentId}`);
+    updateMap(decision.routes, incidentSegmentId);
+  }
+  
+  // 更新 F5 報告（如果當前顯示的是這個事件）
+  if (_currentEventId === eventId) {
+    _renderReportContent(decision);
+  }
+  _renderReportTabs();
+  
+  // 更新 F7 決策依據
+  if (_selectedActivityEventId === eventId) {
+    renderDecisionBasis(decision);
+  }
+  
+  // 記錄到 Activity Log
+  _appendReplanUpdateToActivity(eventId, decision);
+}
+
+// ★ 將 cascade replan 記錄到 Activity Log
+function _appendReplanUpdateToActivity(eventId, decision) {
+  if (!_activityByEvent.has(eventId)) return;
+  
+  const eventData = _activityByEvent.get(eventId);
+  const time = formatTime(new Date().toISOString());
+  
+  const primaryName = decision.routes?.primary?.name || decision.routes?.primary?.segment_id || "(無)";
+  
+  eventData.logs.push({
+    time,
+    label: "路線優化（事件解除觸發）",
+    detail: `新主路線: ${primaryName}`,
+    color: "hsl(142, 71%, 45%)",  // 綠色（正面變化）
+    isRouteChange: true,
+  });
+  
+  // 更新事件列表
+  _renderActivityEventList();
+  
+  // 如果當前選中的是這個事件，即時更新 feed
+  if (_selectedActivityEventId === eventId) {
+    _renderActivityFeed(eventId);
+  }
 }
 
 // --- F2 事件分類到對應等級框 ---
@@ -288,10 +378,34 @@ function addIncidentToLevelBox(decision) {
   const eteMinutes = decision.ete?.minutes;
   const recoveryAt = decision.ete?.recovery_at;
   
+  // ★ 從 incident 取得 timestamp 並格式化為 HH:MM
+  const timestamp = decision.incident?.timestamp;
+  console.log("[addIncidentToLevelBox] timestamp:", timestamp);
+  let timeStr = "";
+  if (timestamp) {
+    try {
+      const d = new Date(timestamp);
+      if (!isNaN(d.getTime())) {
+        timeStr = d.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false });
+      } else {
+        // 嘗試從字串直接解析 "2026-05-20 22:10" 格式
+        const match = timestamp.match(/(\d{2}):(\d{2})/);
+        if (match) timeStr = `${match[1]}:${match[2]}`;
+      }
+    } catch (e) {
+      // fallback: 直接取字串中的時間部分
+      const match = String(timestamp).match(/(\d{2}):(\d{2})/);
+      if (match) timeStr = `${match[1]}:${match[2]}`;
+    }
+  }
+  console.log("[addIncidentToLevelBox] timeStr:", timeStr);
+  
   // ★ 添加 onclick 事件，點擊時切換地圖和報告
   const itemHtml = `
     <div class="incident-item" data-event-id="${escapeHtml(eventId)}" onclick="selectIncidentFromList('${escapeHtml(eventId)}')" style="cursor:pointer;">
-      <div class="incident-item-title">${escapeHtml(title)}</div>
+      <div class="incident-item-title">
+        ${timeStr ? `<span class="incident-time">[${timeStr}]</span> ` : ""}${escapeHtml(title)}
+      </div>
       ${location ? `<div class="incident-item-location">${escapeHtml(location)}</div>` : ""}
       ${eteMinutes ? `<div class="incident-item-ete">ETE: <strong>${eteMinutes}</strong> 分鐘${recoveryAt ? ` · 預計 ${escapeHtml(recoveryAt)}` : ""}</div>` : ""}
     </div>
@@ -525,7 +639,15 @@ function renderIncidentButtons(form) {
     const isInjected = _injectedEventIds.has(e.event_id);
     const disabledAttr = isInjected ? 'disabled style="opacity:0.5;cursor:not-allowed;"' : '';
     const checkMark = isInjected ? ' ✓' : '';
-    return `<button type="button" onclick="injectIncident('${escapeHtml(e.event_id)}')" ${disabledAttr} title="${escapeHtml(e.event_id)}\n${escapeHtml(e.description || '')}">${shortType}（${shortLocation}）${checkMark}</button>`;
+    
+    // ★ 從 timestamp 取得時間 (格式: "2026-05-20 22:10" 或 ISO)
+    let timeStr = "";
+    if (e.timestamp) {
+      const match = String(e.timestamp).match(/(\d{2}):(\d{2})/);
+      if (match) timeStr = `[${match[1]}:${match[2]}] `;
+    }
+    
+    return `<button type="button" onclick="injectIncident('${escapeHtml(e.event_id)}')" ${disabledAttr} title="${escapeHtml(e.event_id)}\n${escapeHtml(e.description || '')}">${timeStr}${shortType}（${shortLocation}）${checkMark}</button>`;
   }
 
   let html = '';
@@ -714,7 +836,16 @@ async function injectIncident(eventId) {
     }
     
     console.log(`[injectIncident] 開始注入事件: ${eventId}`);
-    const data = await fetchEvaluateIncident(eventId);
+    
+    // ★ 模擬器模式：使用模擬器當前時間做飽和度查詢
+    // enabled=true 表示模擬器已啟動（即使暫停中也要用模擬時間）
+    let asOfTime = null;
+    if (SimState.enabled && SimState.currentTime) {
+      asOfTime = SimState.currentTime.toISOString();
+      console.log(`[injectIncident] 模擬器模式，使用時間: ${SimState.currentTime.toLocaleTimeString('zh-TW')}`);
+    }
+    
+    const data = await fetchEvaluateIncident(eventId, asOfTime);
     console.log(`[injectIncident] API 回應:`, data);
     
     if (data.status === "ok" && data.payload) {
@@ -854,10 +985,25 @@ function _renderReportContent(decision) {
   }
 
   // 元資訊
-  html += `<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);font-size:0.62rem;color:var(--text-muted);display:flex;gap:16px;font-variant-numeric:tabular-nums">`;
+  html += `<div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">`;
+  html += `<div style="font-size:0.62rem;color:var(--text-muted);display:flex;gap:16px;font-variant-numeric:tabular-nums">`;
   html += `<span>${decision.trace_id || "—"}</span>`;
   html += `<span>${decision.duration_ms || 0}ms</span>`;
   if (decision.degraded && decision.degraded.length) html += `<span style="color:var(--level-b)">${decision.degraded.join(", ")}</span>`;
+  html += `</div>`;
+  
+  // ★ 解除事件按鈕（只有未解除的事件才顯示）
+  const eventId = decision.incident?.event_id || decision.trace_id;
+  if (!decision._resolved) {
+    html += `<button onclick="resolveIncident('${escapeHtml(eventId)}')" 
+      style="padding:4px 12px;border-radius:4px;font-size:0.68rem;border:1px solid hsl(142,71%,45%);
+             background:transparent;color:hsl(142,71%,45%);cursor:pointer;transition:all 0.15s;"
+      onmouseover="this.style.background='hsl(142,71%,45%)';this.style.color='#000'"
+      onmouseout="this.style.background='transparent';this.style.color='hsl(142,71%,45%)'"
+      title="標記此事件已解除，釋放封閉路段">✓ 解除事件</button>`;
+  } else {
+    html += `<span style="font-size:0.68rem;color:hsl(142,71%,45%)">✓ 已解除</span>`;
+  }
   html += `</div>`;
 
   container.innerHTML = html;
@@ -1464,6 +1610,9 @@ function onSimulationState(payload) {
     SimState.startTime = parseISOTime(payload.start_time);
     SimState.endTime = parseISOTime(payload.end_time);
     SimState.currentTime = parseISOTime(payload.current_time);
+    // ★ 模擬器啟動時，依起始時間載入事件列表
+    _lastIncidentUpdateTime = null;  // 重設，強制更新
+    updateIncidentListByTime(SimState.currentTime);
   } else if (action === "playing") {
     SimState.playing = true;
   } else if (action === "paused") {
@@ -1471,15 +1620,24 @@ function onSimulationState(payload) {
   } else if (action === "reset") {
     SimState.playing = false;
     SimState.currentTime = parseISOTime(payload.current_time);
+    // ★ 重設時重新載入事件列表
+    _lastIncidentUpdateTime = null;
+    updateIncidentListByTime(SimState.currentTime);
   } else if (action === "stopped") {
     SimState.enabled = false;
     SimState.playing = false;
     SimState.currentTime = null;
+    // ★ 停止模擬時，顯示全部事件
+    _lastIncidentUpdateTime = null;
+    initF3InjectForm();  // 載入全部事件
   } else if (action === "ended") {
     SimState.playing = false;
     SimState.currentTime = parseISOTime(payload.current_time);
   } else if (action === "seeked") {
     SimState.currentTime = parseISOTime(payload.current_time);
+    // ★ 跳轉時間時更新事件列表
+    _lastIncidentUpdateTime = null;
+    updateIncidentListByTime(SimState.currentTime);
   }
   
   updateSimUI();
@@ -1488,6 +1646,11 @@ function onSimulationState(payload) {
 function onSimulationTick(payload) {
   SimState.currentTime = parseISOTime(payload.current_time);
   updateSimUI();
+  
+  // ★ 模擬器播放時，依當前時間更新事件注入面板
+  if (SimState.enabled && SimState.currentTime) {
+    updateIncidentListByTime(SimState.currentTime);
+  }
 }
 
 // ========== 路線重規劃處理 ==========
@@ -1580,9 +1743,11 @@ function onRoutesUpdated(payload) {
   }
   _renderReportTabs();
   
-  // 更新 F4 路網圖
+  // ★ 更新 F4 路網圖（傳入事件路段 ID）
   if (decision.routes && typeof updateMap === "function") {
-    updateMap(decision.routes);
+    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+    console.log(`[路線重規劃] 更新地圖，事件路段: ${incidentSegmentId}`);
+    updateMap(decision.routes, incidentSegmentId);
   }
   
   // 更新 F7 決策依據
@@ -1692,6 +1857,50 @@ function _getSegmentName(segmentId) {
 }
 
 // ========== 事件解除處理 ==========
+
+// ★ 呼叫後端 API 解除事件
+async function resolveIncident(eventId) {
+  if (!eventId) return;
+  
+  // 確認對話框
+  const confirmed = confirm(`確定要解除事件 ${eventId}？\n\n這會釋放封閉的路段，讓其他事件可以重新評估替代路線。`);
+  if (!confirmed) return;
+  
+  try {
+    console.log(`[resolveIncident] 開始解除事件: ${eventId}`);
+    
+    const res = await fetch(`/api/incidents/${encodeURIComponent(eventId)}/resolve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "Resolved" }),
+    });
+    
+    const data = await res.json();
+    console.log("[resolveIncident] API 回應:", data);
+    
+    if (data.status === "ok") {
+      // 成功：WebSocket 會推播 incident.resolved.v1，由 onIncidentResolved 處理 UI 更新
+      // 這裡先立即更新本地狀態，避免 UI 延遲
+      const decision = _allDecisions.get(eventId);
+      if (decision) {
+        decision._resolved = true;
+        decision._resolvedAt = data.resolved_at;
+        decision._freedSegment = data.freed_segment;
+        // 重新渲染報告卡片（會顯示「已解除」而非按鈕）
+        if (_currentEventId === eventId) {
+          _renderReportContent(decision);
+        }
+      }
+      
+      console.log(`[resolveIncident] 事件 ${eventId} 已解除，受影響事件: ${data.affected_incidents?.join(", ") || "無"}`);
+    } else {
+      alert(`解除失敗: ${data.errors?.[0]?.message || "未知錯誤"}`);
+    }
+  } catch (e) {
+    console.error("[resolveIncident] 解除失敗:", e);
+    alert("解除事件失敗，請稍後再試");
+  }
+}
 
 function onIncidentResolved(payload) {
   console.log("[事件解除] 收到 incident.resolved.v1:", payload);
@@ -1965,6 +2174,43 @@ async function initSimulation() {
     }
   } catch (e) {
     console.warn("載入模擬狀態失敗:", e);
+  }
+}
+
+// ★ 依模擬時間更新事件注入面板
+let _lastIncidentUpdateTime = null;
+
+async function updateIncidentListByTime(currentTime) {
+  if (!currentTime) return;
+  
+  // 每分鐘才更新一次（避免太頻繁呼叫 API）
+  const currentMinute = currentTime.getMinutes();
+  if (_lastIncidentUpdateTime === currentMinute) return;
+  _lastIncidentUpdateTime = currentMinute;
+  
+  const form = document.getElementById("incident-inject-form");
+  if (!form) return;
+  
+  try {
+    // 呼叫 API 取得該時間點可用的事件
+    const asOf = currentTime.toISOString();
+    const data = await fetchIncidents(asOf);
+    
+    if (data.status === "ok" && data.incidents) {
+      // 比較事件數量是否有變化
+      const newCount = data.incidents.length;
+      const oldCount = _availableIncidents.length;
+      
+      _availableIncidents = data.incidents;
+      renderIncidentButtons(form);
+      
+      // 如果有新事件出現，用 console 記錄（可選：加視覺提示）
+      if (newCount > oldCount) {
+        console.log(`[模擬器] ${formatSimTime(currentTime)} 有 ${newCount - oldCount} 筆新事件可注入`);
+      }
+    }
+  } catch (e) {
+    console.warn("更新事件列表失敗:", e);
   }
 }
 

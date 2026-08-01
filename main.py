@@ -539,8 +539,14 @@ async def get_dashboard():
 
 @app.post("/api/incidents/evaluate")
 async def evaluate_incident(body: dict):
-    """body={"event_id": str}；呼叫 handle_incident()，回傳 decision.completed.v1。"""
+    """body={"event_id": str, "as_of": str (optional)}；呼叫 handle_incident()，回傳 decision.completed.v1。
+    
+    as_of: 可選，ISO 時間字串。若提供（模擬器模式），用此時間做飽和度查詢；
+           若未提供，用事件本身的 timestamp。
+    """
     event_id = body.get("event_id")
+    as_of_str = body.get("as_of")  # ★ 模擬器當前時間
+    
     if not event_id:
         return JSONResponse(status_code=200, content={
             "status": "error",
@@ -557,6 +563,19 @@ async def evaluate_incident(body: dict):
         })
 
     incident = matched[0]
+    
+    # ★ 如果有傳入 as_of，覆寫 incident 的 timestamp（用於模擬器模式）
+    # 這樣 handle_incident 內部的 as-of 查詢會用模擬器當前時間
+    if as_of_str:
+        try:
+            as_of_time = datetime.fromisoformat(as_of_str)
+            if as_of_time.tzinfo is None:
+                as_of_time = as_of_time.replace(tzinfo=_TZ_TAIPEI)
+            # 建立一個新的 incident 副本，覆寫 timestamp
+            incident = incident.model_copy(update={"timestamp": as_of_time})
+            logger.info(f"[模擬器模式] 事件 {event_id} 使用模擬時間 {as_of_time.strftime('%H:%M')} 做飽和度查詢")
+        except Exception as e:
+            logger.warning(f"解析 as_of 時間失敗: {as_of_str}, {e}")
 
     # 廣播 decision.cycle_start.v1（週期開始，不帶 trace_id — 真正的 trace_id
     # 由 handle_incident 內部產生，避免格式對不上）
@@ -673,11 +692,40 @@ async def health():
 
 
 @app.get("/api/incidents")
-async def list_incidents():
-    """取得所有可用事件列表（供前端事件注入面板動態顯示）。"""
+async def list_incidents(as_of: str = None):
+    """取得可用事件列表（供前端事件注入面板動態顯示）。
+    
+    Args:
+        as_of: 可選，ISO 時間字串或 HH:MM 格式。若提供，只回傳 timestamp <= as_of 的事件。
+               用於模擬器模式，讓事件隨時間推進逐步出現。
+    """
     bundle = orchestrator.GATEWAY.load_data()
+    
+    # 解析 as_of 時間
+    cutoff_time = None
+    if as_of:
+        try:
+            if len(as_of) == 5 and ":" in as_of:
+                # HH:MM 格式，用資料中最早的日期補齊
+                traffic_times = [t.timestamp for t in bundle.traffic if t.timestamp]
+                if traffic_times:
+                    base_date = min(traffic_times).date()
+                    hour, minute = map(int, as_of.split(":"))
+                    cutoff_time = datetime(base_date.year, base_date.month, base_date.day, hour, minute, tzinfo=_TZ_TAIPEI)
+            else:
+                cutoff_time = datetime.fromisoformat(as_of)
+                if cutoff_time.tzinfo is None:
+                    cutoff_time = cutoff_time.replace(tzinfo=_TZ_TAIPEI)
+        except Exception as e:
+            logger.warning(f"解析 as_of 時間失敗: {as_of}, {e}")
+    
     incidents = []
     for inc in bundle.incidents:
+        # 若有 cutoff_time，只回傳 timestamp <= cutoff_time 的事件
+        if cutoff_time and inc.timestamp:
+            if inc.timestamp > cutoff_time:
+                continue  # 這個事件還沒發生
+        
         incidents.append({
             "event_id": inc.event_id,
             "type": inc.type,
@@ -688,7 +736,8 @@ async def list_incidents():
             "affected_segment": inc.affected_segment,
             "timestamp": inc.timestamp.isoformat() if inc.timestamp else None,
         })
-    return {"status": "ok", "incidents": incidents}
+    
+    return {"status": "ok", "incidents": incidents, "as_of": as_of}
 
 
 @app.post("/api/reset")
@@ -773,92 +822,100 @@ async def _check_cascade_impact(new_incident) -> None:
 
 
 @app.post("/api/incidents/{event_id}/resolve")
-async def resolve_incident(event_id: str, body: dict = None):
-    """情境4：手動解除事件，釋放路段，讓其他事件可以重新評估。"""
+async def resolve_incident_endpoint(event_id: str, body: dict = None):
+    """情境4：手動解除事件，釋放路段，讓其他事件可以重新評估。
+    
+    使用 orchestrator.resolve_incident() 核心邏輯，包含：
+    1. 從 active_incidents 移除並保存到 resolved_incidents
+    2. 連鎖重規劃：檢查釋放的路段是否影響其他活躍事件的路線
+    3. 推播所有相關更新
+    """
     body = body or {}
     new_status = body.get("status", "Resolved")
     
-    state = orchestrator.get_global_state()
-    record = state.active_incidents.get(event_id)
+    # 呼叫 orchestrator 的核心邏輯
+    result = orchestrator.resolve_incident(event_id, new_status)
     
-    if record is None:
+    if result is None:
         return JSONResponse(status_code=200, content={
             "status": "error",
             "errors": [{"code": "DATA_NOT_FOUND", "message": f"事件 {event_id} 不存在於活躍清單"}],
         })
     
-    # 記錄釋放的路段
-    freed_segment = record.incident.affected_road or record.incident.affected_segment
-    resolved_at = datetime.now(_TZ_TAIPEI)
-    
-    # 保存到歷史紀錄（從 active_incidents 移除）
-    record.incident.status = new_status
-    del state.active_incidents[event_id]
-    
-    logger.info(f"[事件解除] {event_id} 已解除，釋放路段 {freed_segment}")
-    
-    # 通知其他事件：該路段已可用，可重新評估路線
-    await _notify_route_available(freed_segment, event_id)
-    
     # 推播事件解除通知
     await ws_manager.broadcast({
         "message_type": "incident.resolved.v1",
         "payload": {
-            "event_id": event_id,
-            "freed_segment": freed_segment,
-            "resolved_at": resolved_at.isoformat(),
+            "event_id": result.event_id,
+            "freed_segment": result.freed_segment,
+            "resolved_at": result.resolved_at.isoformat(),
             "new_status": new_status,
+            "affected_incidents": result.affected_incidents,
+        },
+    })
+    
+    # 對每個重規劃的事件推播更新
+    for replan_result in result.replan_results:
+        if not replan_result.replanned:
+            continue
+        
+        # 推播路線變更警報
+        await ws_manager.broadcast({
+            "message_type": "routes.updated.v1",
+            "payload": {
+                "event_id": replan_result.event_id,
+                "reason": "SEGMENT_FREED",
+                "freed_by": event_id,
+                "freed_segment": result.freed_segment,
+                "old_primary": replan_result.old_primary,
+                "new_primary": replan_result.new_primary,
+                "old_secondary": replan_result.old_secondary,
+                "new_secondary": replan_result.new_secondary,
+                "time": result.resolved_at.isoformat(),
+            },
+        })
+        
+        # 推播友善提示
+        new_primary_name = replan_result.new_primary or "(無)"
+        old_primary_name = replan_result.old_primary or "(無)"
+        await ws_manager.broadcast({
+            "message_type": "decision.alert.v1",
+            "payload": {
+                "level": "B",
+                "severity": "Medium",
+                "description": f"[路線優化] {replan_result.event_id} 發現更佳替代路線（{result.freed_segment} 已解封）：{old_primary_name} → {new_primary_name}",
+                "alert_type": "ROUTE_OPTIMIZED",
+                "old_primary": replan_result.old_primary,
+                "new_primary": replan_result.new_primary,
+            },
+        })
+        
+        # 推播更新後的完整決策結果
+        if replan_result.new_decision_result:
+            await ws_manager.broadcast({
+                "message_type": "decision.completed.v1",
+                "payload": replan_result.new_decision_result.model_dump(mode="json"),
+            })
+    
+    # 推播 dashboard.updated.v1（KPI 變動：active_incident_count 減少）
+    await ws_manager.broadcast({
+        "message_type": "dashboard.updated.v1",
+        "payload": {
+            "reason": "INCIDENT_RESOLVED",
+            "event_id": event_id,
+            "freed_segment": result.freed_segment,
+            "affected_incidents": result.affected_incidents,
         },
     })
     
     return JSONResponse(content={
         "status": "ok",
         "message": f"事件 {event_id} 已解除",
-        "freed_segment": freed_segment,
-        "resolved_at": resolved_at.isoformat(),
+        "freed_segment": result.freed_segment,
+        "resolved_at": result.resolved_at.isoformat(),
+        "affected_incidents": result.affected_incidents,
+        "replan_count": len([r for r in result.replan_results if r.replanned]),
     })
-
-
-async def _notify_route_available(freed_segment: str, resolved_event_id: str) -> None:
-    """情境4：通知其他活躍事件，某路段已解封，可以重新評估。"""
-    state = orchestrator.get_global_state()
-    as_of = datetime.now(_TZ_TAIPEI)
-    
-    for event_id, record in list(state.active_incidents.items()):
-        if record.decision_result is None or record.decision_result.routes is None:
-            continue
-        
-        routes = record.decision_result.routes
-        
-        # 檢查 excluded 清單是否包含被釋放的路段
-        was_excluded = any(
-            exc.segment_id == freed_segment and exc.reason_code == "CLOSED"
-            for exc in (routes.excluded or [])
-        )
-        
-        if was_excluded:
-            logger.info(f"[路段解封] {freed_segment} 解封，重新評估 {event_id} 的路線")
-            
-            result = orchestrator.check_and_replan_routes(event_id, as_of)
-            
-            if result and result.replanned:
-                await ws_manager.broadcast({
-                    "message_type": "decision.alert.v1",
-                    "payload": {
-                        "level": "B",
-                        "severity": "Medium",
-                        "description": f"[路線優化] {event_id} 發現更佳替代路線（{freed_segment} 已解封）",
-                        "alert_type": "ROUTE_OPTIMIZED",
-                        "old_primary": result.old_primary,
-                        "new_primary": result.new_primary,
-                    },
-                })
-                
-                if result.new_decision_result:
-                    await ws_manager.broadcast({
-                        "message_type": "decision.completed.v1",
-                        "payload": result.new_decision_result.model_dump(mode="json"),
-                    })
 
 
 @app.patch("/api/incidents/{event_id}")

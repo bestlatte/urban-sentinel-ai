@@ -930,6 +930,21 @@ class RouteMonitorResult:
     """重規劃後的新 DecisionResult。"""
 
 
+@dataclass
+class ResolveResult:
+    """resolve_incident() 的回傳結果。"""
+    event_id: str
+    freed_segment: str | None
+    """被釋放的路段 ID。"""
+    affected_incidents: list[str]
+    """受影響並重新規劃的其他事件 ID 清單。"""
+    resolved_record: IncidentRecord
+    """移到 resolved_incidents 的完整紀錄。"""
+    resolved_at: datetime
+    replan_results: list[RouteMonitorResult] = field(default_factory=list)
+    """每個受影響事件的重規劃結果。"""
+
+
 def check_and_replan_routes(
     event_id: str,
     as_of: datetime,
@@ -1053,3 +1068,272 @@ def monitor_all_active_routes(as_of: datetime) -> list[RouteMonitorResult]:
         if result is not None and result.replanned:
             results.append(result)
     return results
+
+
+# ---------------------------------------------------------------------------
+# 事件解除與連鎖重規劃
+# ---------------------------------------------------------------------------
+
+
+def _cascade_replan_after_resolve(
+    freed_segment: str,
+    resolved_event_id: str,
+    as_of: datetime,
+) -> list[RouteMonitorResult]:
+    """事件解除後的連鎖重規劃。
+
+    觸發重規劃的條件（任一符合即重規劃）：
+    1. freed_segment 在該事件的 excluded 清單中（reason_code="CLOSED"）
+    2. freed_segment 在該事件的 candidates 清單中
+    3. freed_segment 在該事件事故路段的 alternatives 中
+    4. ★ 新增：兩個事件影響同一路段（同路段多事件情境）
+
+    Args:
+        freed_segment: 被解除事件釋放的路段 ID
+        resolved_event_id: 被解除的事件 ID（避免對它自己做重規劃）
+        as_of: 重規劃的時間點
+
+    Returns:
+        所有執行過重規劃的結果清單
+    """
+    results: list[RouteMonitorResult] = []
+
+    for event_id, record in list(_STATE.active_incidents.items()):
+        if event_id == resolved_event_id:
+            continue  # 跳過已解除的事件
+
+        if record.decision_result is None:
+            logger.info(f"[連鎖重規劃] {event_id} 尚無 decision_result，跳過")
+            continue
+
+        routes = record.decision_result.routes
+        
+        # ★ 條件 4：兩個事件影響同一路段
+        other_affected_seg = record.incident.affected_road or record.incident.affected_segment
+        is_same_segment = (other_affected_seg == freed_segment)
+        
+        if is_same_segment:
+            logger.info(
+                f"[連鎖重規劃] {resolved_event_id} 解除後，{event_id} 需要重規劃 "
+                f"(reason=SAME_SEGMENT，兩事件都影響 {freed_segment})"
+            )
+            # 同路段事件：即使沒有路線規劃，也可能需要重算 ETE 等
+            result = _force_replan_routes(event_id, as_of, ["SAME_SEGMENT"])
+            if result is not None:
+                results.append(result)
+                if result.replanned:
+                    logger.info(f"[連鎖重規劃] {event_id} 路線已更新: {result.old_primary} → {result.new_primary}")
+            continue
+
+        if routes is None:
+            # 該事件本來就不需要路網規劃（如 SOP-3/5），且不是同路段事件
+            continue
+
+        # 檢查條件 1：freed_segment 是否在 excluded 清單中（reason_code="CLOSED"）
+        was_blocked_by_resolved = any(
+            exc.segment_id == freed_segment and exc.reason_code == "CLOSED"
+            for exc in (routes.excluded or [])
+        )
+
+        # 檢查條件 2：freed_segment 是否為該事件原本的候選路線（在 candidates 中）
+        is_potential_alternative = any(
+            c.segment_id == freed_segment
+            for c in (routes.candidates or [])
+        )
+
+        # 檢查條件 3：freed_segment 是否為該事件事故路段的 alternatives
+        bundle = GATEWAY.load_data()
+        segment_map = {seg.segment_id: seg for seg in bundle.road_network}
+        affected_segment_data = segment_map.get(other_affected_seg)
+        is_in_alternatives = (
+            affected_segment_data is not None
+            and freed_segment in affected_segment_data.alternatives
+        )
+
+        should_replan = was_blocked_by_resolved or is_potential_alternative or is_in_alternatives
+
+        if not should_replan:
+            logger.debug(f"[連鎖重規劃] {event_id} 不需重規劃（freed={freed_segment} 與該事件無關）")
+            continue
+
+        reason = []
+        if was_blocked_by_resolved:
+            reason.append("CLOSED_CLEARED")
+        if is_potential_alternative:
+            reason.append("CANDIDATE_AVAILABLE")
+        if is_in_alternatives:
+            reason.append("ALTERNATIVE_AVAILABLE")
+
+        logger.info(
+            f"[連鎖重規劃] {resolved_event_id} 解除後，{event_id} 需要重規劃 "
+            f"(freed={freed_segment}, reason={reason})"
+        )
+
+        # 強制重新規劃
+        result = _force_replan_routes(event_id, as_of, reason)
+
+        if result is not None:
+            results.append(result)
+            if result.replanned:
+                logger.info(f"[連鎖重規劃] {event_id} 路線已更新: {result.old_primary} → {result.new_primary}")
+
+    return results
+
+
+def _force_replan_routes(
+    event_id: str,
+    as_of: datetime,
+    reason: list[str],
+) -> RouteMonitorResult | None:
+    """強制重新規劃指定事件的路線（用於事件解除後的連鎖重規劃）。
+    
+    與 check_and_replan_routes 不同，這個函式不檢查路線是否「失效」，
+    而是直接重新規劃，因為可能有更好的選項出現。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return None
+
+    old_routes = record.decision_result.routes
+    if old_routes is None:
+        return None
+
+    old_primary = old_routes.primary.segment_id if old_routes.primary else None
+    old_secondary = old_routes.secondary.segment_id if old_routes.secondary else None
+
+    # 取得當前 bundle
+    bundle = GATEWAY.load_data()
+
+    # 重新規劃路線
+    new_route_plan = GATEWAY.plan_routes(
+        RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
+    )
+
+    new_primary = new_route_plan.primary.segment_id if new_route_plan.primary else None
+    new_secondary = new_route_plan.secondary.segment_id if new_route_plan.secondary else None
+
+    # 比較是否有變化
+    route_changed = (old_primary != new_primary) or (old_secondary != new_secondary)
+
+    if not route_changed:
+        logger.info(f"[連鎖重規劃] {event_id} 路線未變更（{old_primary} 仍是最佳選擇）")
+        return RouteMonitorResult(
+            event_id=event_id,
+            replanned=False,
+            old_primary=old_primary,
+            new_primary=new_primary,
+            old_secondary=old_secondary,
+            new_secondary=new_secondary,
+            invalid_reasons={r: "REPLAN_REQUESTED" for r in reason},
+        )
+
+    logger.info(f"[連鎖重規劃] {event_id} 路線有變化：{old_primary} → {new_primary}")
+
+    # 更新 decision_result
+    old_decision = record.decision_result
+    degraded = list(old_decision.degraded)
+
+    # 重新生成報告書與簡訊
+    new_report = old_decision.control_center_report
+    new_notification = old_decision.notifications
+
+    if record.sensing_result is not None:
+        try:
+            new_report, new_notification = GATEWAY.generate_report(
+                incident=record.incident,
+                sensing=record.sensing_result,
+                route_plan=new_route_plan,
+                ete=old_decision.ete,
+                advisory=None,
+                bundle=bundle,
+            )
+            logger.info(f"[連鎖重規劃] {event_id} 報告書已重新生成")
+        except Exception as e:
+            logger.warning(f"[連鎖重規劃] {event_id} 報告書重新生成失敗: {e}")
+            if "C1_REPLAN_FAILED" not in degraded:
+                degraded.append("C1_REPLAN_FAILED")
+
+    new_decision = DecisionResult(
+        trace_id=old_decision.trace_id,
+        triggered_by=old_decision.triggered_by,
+        level=old_decision.level,
+        incident=old_decision.incident,
+        routes=new_route_plan,
+        ete=old_decision.ete,
+        control_center_report=new_report,
+        notifications=new_notification,
+        degraded=degraded,
+        duration_ms=old_decision.duration_ms,
+        is_simulated=old_decision.is_simulated,
+    )
+    record.decision_result = new_decision
+    record.route_replan_count += 1
+
+    return RouteMonitorResult(
+        event_id=event_id,
+        replanned=True,
+        old_primary=old_primary,
+        new_primary=new_primary,
+        old_secondary=old_secondary,
+        new_secondary=new_secondary,
+        invalid_reasons={r: "SEGMENT_FREED" for r in reason},
+        new_decision_result=new_decision,
+    )
+
+
+def resolve_incident(event_id: str, new_status: str = "Resolved") -> ResolveResult | None:
+    """解除事件的核心邏輯。
+
+    1. 從 active_incidents 取出並移除
+    2. 更新事件狀態
+    3. 保存到 resolved_incidents（歷史紀錄）
+    4. 執行連鎖重規劃
+    5. 回傳完整結果
+
+    Args:
+        event_id: 要解除的事件 ID
+        new_status: 新狀態，預設 "Resolved"，也可以是 "Partial_Open" 等
+
+    Returns:
+        ResolveResult 或 None（如果事件不存在）
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None:
+        logger.warning(f"[事件解除] {event_id} 不存在於 active_incidents")
+        return None
+
+    # 記錄被釋放的路段
+    freed_segment = record.incident.affected_road or record.incident.affected_segment
+    resolved_at = datetime.now(_TZ_TAIPEI)
+
+    # 更新事件狀態
+    record.incident.status = new_status
+
+    # 從 active_incidents 移除
+    del _STATE.active_incidents[event_id]
+
+    # 保存到 resolved_incidents（歷史紀錄）
+    _STATE.resolved_incidents[event_id] = record
+
+    logger.info(f"[事件解除] {event_id} 已解除，釋放路段 {freed_segment}，狀態更新為 {new_status}")
+
+    # 執行連鎖重規劃
+    replan_results: list[RouteMonitorResult] = []
+    if freed_segment:
+        replan_results = _cascade_replan_after_resolve(freed_segment, event_id, resolved_at)
+
+    affected_incidents = [r.event_id for r in replan_results if r.replanned]
+
+    return ResolveResult(
+        event_id=event_id,
+        freed_segment=freed_segment,
+        affected_incidents=affected_incidents,
+        resolved_record=record,
+        resolved_at=resolved_at,
+        replan_results=replan_results,
+    )
+
+
+def get_resolved_incidents() -> dict[str, IncidentRecord]:
+    """取得已解除事件的歷史紀錄，供 Dashboard 或歷史查詢使用。"""
+    return _STATE.resolved_incidents.copy()
