@@ -1617,6 +1617,44 @@ body.side-nav-collapsed .page-content {
   line-height: 1;
 }
 
+/* 通知紅點（收合時顯示在 toggle 按鈕上） */
+.nav-notify-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--level-a);
+}
+
+.nav-notify-dot[hidden] { display: none; }
+
+/* 展開時隱藏紅點 */
+.right-side-nav:not(.collapsed) .nav-notify-dot { display: none; }
+
+/* Reports badge（展開時顯示在 Reports 按鈕旁） */
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--level-a);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.nav-badge[hidden] { display: none; }
+
+/* 收合時隱藏 badge */
+.right-side-nav.collapsed .nav-badge { display: none; }
+
 .right-side-nav.collapsed {
   width: 20px;
   height: 48px;

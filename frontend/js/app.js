@@ -129,10 +129,12 @@ function _renderInjectedEventsKpi() {
   const card = document.querySelector('.kpi-card[data-kpi="latest_injected_event"]');
   if (!card) return;
   const names = [..._injectedEventNames.values()];
-  const content = names.length
-    ? names.map((name) => `<div class="kpi-event-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>`).join("")
-    : '<div class="kpi-event-empty">尚未注入</div>';
-  card.innerHTML = `<div class="kpi-value kpi-event-list">${content}</div><div class="kpi-label">事件注入名稱</div>`;
+  if (names.length === 0) {
+    card.innerHTML = `<div class="kpi-value kpi-event-list"><div class="kpi-event-empty">尚未注入</div></div><div class="kpi-label">當前事件</div>`;
+    return;
+  }
+  const latest = names[names.length - 1];
+  card.innerHTML = `<div class="kpi-value" style="font-size:0.78rem;line-height:1.35;font-weight:600" title="${escapeHtml(latest)}">${escapeHtml(latest)}</div><div class="kpi-label">當前事件</div>`;
 }
 
 function _recordInjectedEvent(decision) {
@@ -731,6 +733,7 @@ async function _doResetSystem(showAlert = true) {
       _processedTraceIds.clear();
       _currentEventId = null;
       _selectedActivityEventId = null;
+      _updateReportsBadge();
       _lastInjectedEventId = null;
       
       console.log("[_doResetSystem] 清空後 _activityByEvent.size =", _activityByEvent.size);
@@ -2534,5 +2537,17 @@ function _updateReportsOnNewDecision() {
   const reportsPage = document.getElementById("page-reports");
   if (reportsPage && !reportsPage.hidden) {
     renderReportsEventList();
+  }
+  _updateReportsBadge();
+}
+
+function _updateReportsBadge() {
+  const count = _allDecisions.size;
+  const dot = document.getElementById("nav-notify-dot");
+  const badge = document.getElementById("nav-reports-badge");
+  if (dot) dot.hidden = count === 0;
+  if (badge) {
+    badge.hidden = count === 0;
+    badge.textContent = count;
   }
 }

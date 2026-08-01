@@ -40,6 +40,7 @@
   <aside class="right-side-nav" aria-label="主要頁面導覽">
     <button class="right-side-nav-toggle" type="button" onclick="toggleRightSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
       <span>›</span>
+      <span class="nav-notify-dot" id="nav-notify-dot" hidden></span>
     </button>
     <div class="side-nav-title">Workspace</div>
     <nav class="page-nav" id="page-nav">
@@ -58,6 +59,7 @@
       <button class="page-nav-btn" data-page="reports" onclick="switchPage('reports')" title="Reports">
         <span class="page-nav-icon">📄</span>
         <span class="page-nav-label">Reports</span>
+        <span class="nav-badge" id="nav-reports-badge" hidden>0</span>
       </button>
     </nav>
     <div class="side-nav-footer">
