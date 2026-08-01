@@ -39,32 +39,10 @@ function trendChartOptions() {
 
 function initCharts() {
   const container = document.getElementById("f1-charts");
-  if (!container || typeof Chart === "undefined") return;
+  if (!container) return;
 
-  const canvas = document.createElement("canvas");
-  canvas.id = "traffic-chart";
-  canvas.style.width = "100%";
-  canvas.style.height = "180px";
-  container.appendChild(canvas);
-
-  trafficChart = new Chart(canvas.getContext("2d"), {
-    type: "line",
-    data: {
-      labels: [],
-      datasets: [{
-        label: "平均飽和度",
-        data: [],
-        borderColor: "#6B4932",
-        backgroundColor: "rgba(107, 73, 50, 0.08)",
-        tension: 0.4,
-        fill: true,
-        borderWidth: 1.5,
-        pointRadius: 0,
-        pointHoverRadius: 3,
-      }],
-    },
-    options: trendChartOptions(),
-  });
+  // 初始不顯示圖表，等事件注入後才渲染長條圖
+  container.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted,#846B58);font-size:0.82rem;font-weight:500;">匯入事件後顯示相關路段飽和度長條圖</div>`;
 }
 
 function updateChartData(trafficSamples) {
@@ -162,7 +140,20 @@ function setTrafficChartHeader(text) {
 }
 
 async function updateTrafficChartForIncident(decision) {
-  if (!trafficChart || !decision?.incident) return;
+  if (!decision?.incident) return;
+
+  // 確保 canvas 存在（initCharts 初始只放提示文字）
+  const container = document.getElementById("f1-charts");
+  if (!container) return;
+  let canvas = document.getElementById("traffic-chart");
+  if (!canvas) {
+    container.innerHTML = "";
+    canvas = document.createElement("canvas");
+    canvas.id = "traffic-chart";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    container.appendChild(canvas);
+  }
 
   try {
     const [rows, topology] = await Promise.all([
