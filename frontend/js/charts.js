@@ -1,103 +1,239 @@
-/**
- * Chart.js 車流／人流時序圖與門檻線。
- * 門檻線：0.85（B級）/ 0.95（A級），來自 02-data-contract.md §4。
- * Chart.js 從 frontend/vendor/chart.umd.js 載入。
- */
+/** Traffic Flow charts powered by the bundled Chart.js build. */
 
 let trafficChart = null;
+let rawTrafficFlowData = null;
+let rawTrafficFlowPromise = null;
+
+function replaceTrafficChart(config) {
+  const canvas = document.getElementById("traffic-chart");
+  if (!canvas || typeof Chart === "undefined") return null;
+  if (trafficChart) trafficChart.destroy();
+  trafficChart = new Chart(canvas.getContext("2d"), config);
+  return trafficChart;
+}
+
+function trendChartOptions() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: {
+        min: 0,
+        max: 1.1,
+        grid: { color: "rgba(107, 73, 50, 0.10)" },
+        ticks: { color: "#665244", font: { size: 10 } },
+      },
+      x: {
+        grid: { color: "rgba(107, 73, 50, 0.07)" },
+        ticks: { color: "#665244", font: { size: 10 }, maxRotation: 0 },
+      },
+    },
+  };
+}
 
 function initCharts() {
-  const ctx = document.getElementById("f1-charts");
-  if (!ctx || typeof Chart === "undefined") return;
+  const container = document.getElementById("f1-charts");
+  if (!container || typeof Chart === "undefined") return;
 
   const canvas = document.createElement("canvas");
   canvas.id = "traffic-chart";
   canvas.style.width = "100%";
   canvas.style.height = "180px";
-  ctx.appendChild(canvas);
+  container.appendChild(canvas);
 
   trafficChart = new Chart(canvas.getContext("2d"), {
     type: "line",
     data: {
       labels: [],
-      datasets: [
-        {
-          label: "平均飽和度",
-          data: [],
-          borderColor: "hsl(0, 0%, 65%)",
-          backgroundColor: "hsla(0, 0%, 65%, 0.05)",
-          tension: 0.4,
-          fill: true,
-          borderWidth: 1.5,
-          pointRadius: 0,
-          pointHoverRadius: 3,
-        },
-      ],
+      datasets: [{
+        label: "平均飽和度",
+        data: [],
+        borderColor: "#6B4932",
+        backgroundColor: "rgba(107, 73, 50, 0.08)",
+        tension: 0.4,
+        fill: true,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+      }],
     },
-    options: {
+    options: trendChartOptions(),
+  });
+}
+
+function updateChartData(trafficSamples) {
+  if (!trafficChart || !Array.isArray(trafficSamples)) return;
+  const timeMap = {};
+  trafficSamples.forEach((sample) => {
+    const time = sample.timestamp ? sample.timestamp.slice(11, 16) : "";
+    if (!timeMap[time]) timeMap[time] = [];
+    timeMap[time].push(sample.saturation_score);
+  });
+
+  const times = Object.keys(timeMap).sort();
+  const lineData = {
+    labels: times,
+    datasets: [{
+    label: "平均飽和度",
+    data: times.map((time) => {
+      const values = timeMap[time];
+      return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }),
+    borderColor: "#6B4932",
+    backgroundColor: "rgba(107, 73, 50, 0.08)",
+    tension: 0.4,
+    fill: true,
+    borderWidth: 1.5,
+    pointRadius: 0,
+    pointHoverRadius: 3,
+    }],
+  };
+  if (trafficChart.config.type !== "line") {
+    replaceTrafficChart({ type: "line", data: lineData, options: trendChartOptions() });
+  } else {
+    trafficChart.data = lineData;
+    trafficChart.options = trendChartOptions();
+    trafficChart.update();
+  }
+  setTrafficChartHeader("Traffic Flow");
+}
+
+async function loadRawTrafficFlowData() {
+  if (rawTrafficFlowData) return rawTrafficFlowData;
+  if (!rawTrafficFlowPromise) {
+    rawTrafficFlowPromise = fetch("/data/city_traffic_flow.json")
+      .then((response) => {
+        if (!response.ok) throw new Error(`Traffic data HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((rows) => {
+        rawTrafficFlowData = Array.isArray(rows) ? rows : [];
+        return rawTrafficFlowData;
+      })
+      .catch((error) => {
+        rawTrafficFlowPromise = null;
+        throw error;
+      });
+  }
+  return rawTrafficFlowPromise;
+}
+
+function parseTrafficTimestamp(value) {
+  if (!value) return null;
+  const parsed = new Date(String(value).replace(" ", "T"));
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function setTrafficChartHeader(text) {
+  const header = document.querySelector("#f1-charts .section-header");
+  if (header) header.textContent = text;
+}
+
+async function updateTrafficChartForIncident(decision) {
+  if (!trafficChart || !decision?.incident) return;
+
+  try {
+    const rows = await loadRawTrafficFlowData();
+    if (!rows.length) return;
+
+    const incidentTime = parseTrafficTimestamp(decision.incident.timestamp);
+    const availableTimes = [...new Set(rows.map((row) => row.Timestamp).filter(Boolean))];
+    let selectedTime = availableTimes[availableTimes.length - 1];
+    if (incidentTime && availableTimes.length) {
+      selectedTime = availableTimes.reduce((closest, candidate) => {
+        const closestDate = parseTrafficTimestamp(closest);
+        const candidateDate = parseTrafficTimestamp(candidate);
+        if (!candidateDate) return closest;
+        if (!closestDate) return candidate;
+        return Math.abs(candidateDate - incidentTime) < Math.abs(closestDate - incidentTime) ? candidate : closest;
+      }, availableTimes[0]);
+    }
+
+    const snapshot = rows
+      .filter((row) => row.Timestamp === selectedTime)
+      .sort((a, b) => String(a.Segment_ID).localeCompare(String(b.Segment_ID)));
+    if (!snapshot.length) return;
+
+    const barChart = replaceTrafficChart({
+      type: "bar",
+      data: {
+        labels: snapshot.map((row) => row.Road_Name || row.Segment_ID),
+        datasets: [
+      {
+        label: "Avg Speed (km/h)",
+        data: snapshot.map((row) => row.Avg_Speed),
+        yAxisID: "ySpeed",
+        backgroundColor: "rgba(107, 73, 50, 0.78)",
+        borderColor: "#6B4932",
+        borderWidth: 1,
+        borderRadius: 5,
+        maxBarThickness: 26,
+      },
+      {
+        label: "Saturation Score",
+        data: snapshot.map((row) => row.Saturation_Score),
+        yAxisID: "ySaturation",
+        backgroundColor: "rgba(185, 107, 59, 0.72)",
+        borderColor: "#A85E34",
+        borderWidth: 1,
+        borderRadius: 5,
+        maxBarThickness: 26,
+      },
+        ],
+      },
+      options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
       plugins: {
-        legend: { display: false },
-        annotation: {
-          annotations: {
-            lineB: {
-              type: "line",
-              yMin: 0.85,
-              yMax: 0.85,
-              borderColor: "hsl(25, 95%, 53%)",
-              borderWidth: 1,
-              borderDash: [4, 4],
-              label: { content: "B  0.85", display: true, position: "start", font: { size: 9 }, color: "hsl(25, 95%, 53%)" },
+        legend: {
+          display: true,
+          position: "top",
+          align: "end",
+          labels: { color: "#665244", boxWidth: 10, boxHeight: 10, usePointStyle: true, font: { size: 10 } },
+        },
+        tooltip: {
+          callbacks: {
+            title(items) {
+              const row = snapshot[items[0]?.dataIndex];
+              return row ? `${row.Road_Name} · ${row.Segment_ID}` : "";
             },
-            lineA: {
-              type: "line",
-              yMin: 0.95,
-              yMax: 0.95,
-              borderColor: "hsl(0, 84%, 60%)",
-              borderWidth: 1,
-              borderDash: [4, 4],
-              label: { content: "A  0.95", display: true, position: "start", font: { size: 9 }, color: "hsl(0, 84%, 60%)" },
+            afterBody(items) {
+              const row = snapshot[items[0]?.dataIndex];
+              return row ? [`車流量 ${row.Vehicle_Count ?? "—"}`, `車道狀態 ${row.Lane_Status || "—"}`] : [];
             },
           },
         },
       },
       scales: {
-        y: {
-          min: 0,
-          max: 1.1,
-          grid: { color: "hsl(0, 0%, 10%)" },
-          ticks: { color: "hsl(0, 0%, 40%)", font: { size: 10 } },
-          title: { display: false },
+        x: { grid: { display: false }, ticks: { color: "#665244", font: { size: 9 }, maxRotation: 35, minRotation: 0 } },
+        ySpeed: {
+          beginAtZero: true,
+          position: "left",
+          suggestedMax: 60,
+          grid: { color: "rgba(107, 73, 50, 0.10)" },
+          ticks: { color: "#665244", font: { size: 9 } },
+          title: { display: true, text: "km/h", color: "#665244", font: { size: 9 } },
         },
-        x: {
-          grid: { color: "hsl(0, 0%, 8%)" },
-          ticks: { color: "hsl(0, 0%, 40%)", font: { size: 10 }, maxRotation: 0 },
-          title: { display: false },
+        ySaturation: {
+          beginAtZero: true,
+          min: 0,
+          max: 1,
+          position: "right",
+          grid: { drawOnChartArea: false },
+          ticks: { color: "#A85E34", font: { size: 9 } },
+          title: { display: true, text: "Saturation", color: "#A85E34", font: { size: 9 } },
         },
       },
-    },
-  });
-}
+      },
+    });
+    if (!barChart) return;
 
-function updateChartData(trafficSamples) {
-  if (!trafficChart || !trafficSamples) return;
-
-  // 計算每個時間點的平均飽和度
-  const timeMap = {};
-  trafficSamples.forEach((s) => {
-    const t = s.timestamp ? s.timestamp.slice(11, 16) : "";
-    if (!timeMap[t]) timeMap[t] = [];
-    timeMap[t].push(s.saturation_score);
-  });
-
-  const sorted = Object.keys(timeMap).sort();
-  const avgData = sorted.map((t) => {
-    const vals = timeMap[t];
-    return vals.reduce((a, b) => a + b, 0) / vals.length;
-  });
-
-  trafficChart.data.labels = sorted;
-  trafficChart.data.datasets[0].data = avgData;
-  trafficChart.update();
+    const eventId = decision.incident.event_id || "事件";
+    setTrafficChartHeader(`Traffic Flow · ${eventId} · ${selectedTime?.slice(11, 16) || ""}`);
+    barChart.update();
+  } catch (error) {
+    console.warn("事件 Traffic Flow 長條圖載入失敗:", error);
+  }
 }

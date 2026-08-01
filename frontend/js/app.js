@@ -159,6 +159,10 @@ function onDecisionCompleted(decision) {
   // 用 trace_id 去重（REST 回應 + WS 推播會各呼叫一次，避免重複計數）
   if (decision.trace_id && _processedTraceIds.has(decision.trace_id)) return;
   if (decision.trace_id) _processedTraceIds.add(decision.trace_id);
+
+  if (typeof updateTrafficChartForIncident === "function") {
+    updateTrafficChartForIncident(decision);
+  }
   
   // 記錄到 Activity Log
   _recordDecisionForActivity(decision);
@@ -276,7 +280,11 @@ function selectIncidentFromList(eventId) {
   
   // 切換 report tab
   if (_allDecisions.has(eventId)) {
+    const decision = _allDecisions.get(eventId);
     switchReportTab(eventId);
+    if (typeof updateTrafficChartForIncident === "function") {
+      updateTrafficChartForIncident(decision);
+    }
   }
   
   // 切換 Activity 面板
@@ -856,6 +864,9 @@ function switchReportTab(eventId) {
   if (!_allDecisions.has(eventId)) return;
   _currentEventId = eventId;
   const decision = _allDecisions.get(eventId);
+  if (typeof updateTrafficChartForIncident === "function") {
+    updateTrafficChartForIncident(decision);
+  }
   _renderReportTabs();
   _renderReportContent(decision);
   
