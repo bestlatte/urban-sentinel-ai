@@ -210,12 +210,17 @@ function onDecisionCompleted(decision) {
   _recordDecisionForActivity(decision);
   
   // 更新 F4 路網圖（傳入事件發生的路段 ID）
+  // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點（地圖上沒有座標）
+  const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
+  
   if (decision.routes) {
-    // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點（地圖上沒有座標）
-    const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
+    // 有疏散路線：顯示路線 + 事件點
     updateMap(decision.routes, incidentSegmentId);
     // 同步更新地理圖
     if (typeof updateGeoMap === "function") updateGeoMap(decision.routes);
+  } else if (incidentSegmentId) {
+    // 沒有疏散路線（如 SOP-4 大型活動散場）：只標示事件發生點
+    updateMap(null, incidentSegmentId);
   }
   // 標記事故在地理圖上
   if (decision.incident && typeof markIncidentOnGeoMap === "function") {
@@ -872,11 +877,16 @@ async function injectIncident(eventId) {
       onDecisionCompleted(decision);
       
       // ★ 確保地圖立即更新（傳入事件發生的路段 ID）
+      // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
+      const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
+      console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}, routes: ${decision.routes ? '有' : '無'}`);
+      
       if (decision.routes) {
-        // 優先用 affected_road（RD_* 路段 ID），因為 affected_segment 可能是 BS_* 站點
-        const incidentSegmentId = decision.incident?.affected_road || decision.incident?.affected_segment || null;
-        console.log(`[injectIncident] 直接呼叫 updateMap, 事件路段: ${incidentSegmentId}`);
+        // 有疏散路線：顯示路線 + 事件點
         updateMap(decision.routes, incidentSegmentId);
+      } else if (incidentSegmentId) {
+        // 沒有疏散路線：只標示事件發生點
+        updateMap(null, incidentSegmentId);
       }
       // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
     }
