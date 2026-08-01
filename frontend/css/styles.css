@@ -62,7 +62,48 @@ body {
 }
 
 .col-left { display: flex; flex-direction: column; gap: 14px; }
-.col-right { display: flex; flex-direction: column; gap: 14px; max-height: calc(100vh - 80px); overflow-y: auto; }
+.col-right { display: flex; flex-direction: column; gap: 14px; height: calc(100vh - 80px); overflow: hidden; }
+
+/* 右欄三個獨立區塊：Time Simulation / Event Injection / Advisory Report */
+#simulation-panel {
+  flex: 0 0 auto;
+}
+
+#f3-inject {
+  flex: 0 1 auto;
+  max-height: 460px;
+  overflow: hidden;
+}
+
+#f3-inject .inject-panel-content {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+#f5-report {
+  flex: 1 1 auto;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#f5-report .section-header {
+  flex-shrink: 0;
+}
+
+/* F5 報告 tabs（事件選擇列）*/
+#f5-report-tabs {
+  flex-shrink: 0;
+}
+
+#f5-report-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
 
 /* ===== SECTION / CARD ===== */
 .section { width: 100%; }
@@ -220,17 +261,7 @@ body {
 
 #f7-activity-feed { font-size: 0.72rem; line-height: 1.7; }
 
-/* ===== F5 REPORT ===== */
-#f5-report {
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-#f5-report-content {
-  font-size: 0.78rem;
-  line-height: 1.7;
-  color: var(--text-secondary);
-}
+/* [已移至上方] F5 REPORT 樣式定義在 col-right 後面 */
 
 /* ===== ALERT MODAL ===== */
 #f2-alert-modal {
@@ -940,9 +971,8 @@ body.side-nav-collapsed .page-content {
 
 /* ===== REPORT EXPANDED (擴大報告區域) ===== */
 #f5-report.report-expanded {
-  max-height: 400px;
-  overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 180px;
 }
 
 #f5-report.report-expanded #f5-report-content {
@@ -1789,8 +1819,7 @@ body.right-side-nav-collapsed .page-content {
 
 /* ===== F3 事件注入面板 ===== */
 #f3-inject {
-  max-height: none;
-  overflow: visible;
+  overflow: hidden;
 }
 
 #f3-inject.collapsed .inject-panel-content {
@@ -1824,8 +1853,6 @@ body.right-side-nav-collapsed .page-content {
 
 .inject-panel-content {
   display: block;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 #f3-inject #incident-inject-form {
@@ -1857,6 +1884,22 @@ body.right-side-nav-collapsed .page-content {
   background: linear-gradient(135deg, hsl(0, 65%, 35%), hsl(0, 65%, 30%));
   color: hsl(0, 80%, 85%);
   border-color: hsl(0, 60%, 45%);
+}
+
+/* ★ 事件注入面板 - 等待模擬器啟動的提示 */
+.inject-empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  text-align: center;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  opacity: 0.8;
 }
 
 .inject-group {

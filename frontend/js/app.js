@@ -168,25 +168,7 @@ function _renderLevelKpi() {
 }
 function renderDashboard(payload) {
   renderKpis(payload.kpis);
-  // 如果有 active_incidents，顯示在 F3 旁邊或下方
-  if (payload.active_incidents && payload.active_incidents.length) {
-    renderActiveIncidentsList(payload.active_incidents);
-  }
-}
-
-function renderActiveIncidentsList(incidents) {
-  const inject = document.getElementById("f3-inject");
-  if (!inject) return;
-  // 在注入按鈕下方加事件狀態列表
-  let existing = document.getElementById("active-incidents-list");
-  if (!existing) {
-    existing = document.createElement("div");
-    existing.id = "active-incidents-list";
-    existing.style.cssText = "margin-top:12px;padding-top:10px;border-top:1px solid var(--border)";
-    inject.appendChild(existing);
-  }
-  existing.innerHTML = `<div style="font-size:0.65rem;color:var(--muted-foreground);margin-bottom:6px">進行中事件</div>` +
-    incidents.map(i => `<div style="font-size:0.73rem;padding:3px 0;color:hsl(0,0%,70%)">${escapeHtml(i.event_id)} · ${escapeHtml(i.location || i.type)}</div>`).join("");
+  // [已移除] 進行中事件列表 - 事件狀態由 Event Injection 面板顯示
 }
 
 // --- WS 回呼 ---
@@ -599,34 +581,16 @@ async function initF3InjectForm() {
     return;
   }
 
-  console.log("[initF3InjectForm] 開始載入事件列表...");
+  console.log("[initF3InjectForm] 初始化事件注入面板（等待模擬器啟動）");
   
-  // 顯示載入中狀態
-  form.innerHTML = `<div style="font-size:0.72rem;color:var(--text-muted);padding:8px 0;">載入事件列表中...</div>`;
-
-  // 從後端載入事件列表
-  try {
-    const data = await fetchIncidents();
-    console.log("[initF3InjectForm] API 回應:", data);
-    
-    if (data.status === "ok" && data.incidents) {
-      _availableIncidents = data.incidents;
-      console.log(`[initF3InjectForm] 載入 ${_availableIncidents.length} 筆事件`);
-      renderIncidentButtons(form);
-    } else {
-      console.error("[initF3InjectForm] API 回應錯誤:", data);
-      form.innerHTML = `<div style="font-size:0.72rem;color:var(--level-a);">載入失敗: ${JSON.stringify(data)}</div>`;
-    }
-  } catch (e) {
-    console.error("載入事件列表失敗:", e);
-    // 失敗時顯示預設的三個事件
-    _availableIncidents = [
-      { event_id: "TPE_2026_ACC_001", type: "Road_Collapse_Accident", location: "光復南路", severity: "Critical" },
-      { event_id: "TPE_2026_EVT_002", type: "Crowd_Surge_Injury", location: "國父紀念館站", severity: "High" },
-      { event_id: "TPE_2026_EVT_003", type: "Power_Failure", location: "松高路", severity: "Medium" },
-    ];
-    renderIncidentButtons(form);
-  }
+  // ★ 網頁剛打開時：顯示提示訊息，不載入事件
+  // 事件會在模擬器啟動後由 onSimulationState() 觸發載入
+  _availableIncidents = [];
+  form.innerHTML = `<div class="inject-empty-hint">
+    <div style="font-size:1.2rem;margin-bottom:8px;">⏱️</div>
+    <div>請啟動時間模擬器</div>
+    <div style="font-size:0.65rem;margin-top:4px;">事件將依模擬時間逐步出現</div>
+  </div>`;
 }
 
 function renderIncidentButtons(form) {
@@ -697,13 +661,6 @@ function renderIncidentButtons(form) {
     </div>`;
   }
 
-  // 模擬事件區塊
-  html += `
-    <div style="margin:12px 0 8px;padding-top:10px;border-top:1px solid var(--border);font-size:0.65rem;color:var(--text-muted);">模擬事件</div>
-    <button type="button" onclick="generateRandomIncident()" style="background:linear-gradient(135deg, hsl(200,70%,40%), hsl(260,70%,50%));color:white;border:none;">🎲 模擬隨機事件</button>
-    <button type="button" onclick="reloadIncidentList()" style="margin-top:4px;background:transparent;color:var(--text-muted);border-color:var(--border);">🔄 重新載入事件列表</button>
-  `;
-
   form.innerHTML = html;
 }
 
@@ -748,17 +705,15 @@ async function generateRandomIncident() {
   }
 }
 
-// 重設系統狀態
-async function resetSystem() {
-  if (!confirm("確定要重設系統？這會清空所有進行中的事件。")) return;
-  
-  console.log("[resetSystem] 開始重設...");
-  console.log("[resetSystem] 重設前 _activityByEvent.size =", _activityByEvent.size);
+// 重設系統核心邏輯（不含確認對話框）
+async function _doResetSystem(showAlert = true) {
+  console.log("[_doResetSystem] 開始重設...");
+  console.log("[_doResetSystem] 重設前 _activityByEvent.size =", _activityByEvent.size);
   
   try {
     const res = await fetch("/api/reset", { method: "POST" });
     const data = await res.json();
-    console.log("[resetSystem] 後端回應:", data);
+    console.log("[_doResetSystem] 後端回應:", data);
     
     if (data.status === "ok") {
       // 清空前端狀態（使用多種方式確保徹底清空）
@@ -778,11 +733,21 @@ async function resetSystem() {
       _selectedActivityEventId = null;
       _lastInjectedEventId = null;
       
-      console.log("[resetSystem] 清空後 _activityByEvent.size =", _activityByEvent.size);
+      console.log("[_doResetSystem] 清空後 _activityByEvent.size =", _activityByEvent.size);
       
       // 清空飽和地圖資料
       if (typeof clearSaturationData === "function") {
         clearSaturationData();
+      }
+      
+      // 清空 F4 路網地圖路線
+      if (typeof clearMapRoutes === "function") {
+        clearMapRoutes();
+      }
+      
+      // 清空 F4 Geographic 地圖路線
+      if (typeof clearGeoMap === "function") {
+        clearGeoMap();
       }
       
       // 重新載入 Dashboard
@@ -792,18 +757,22 @@ async function resetSystem() {
       }
       
       // 重新初始化注入表單（恢復按鈕狀態）
+      // 注意：這會顯示「請啟動模擬器」提示，模擬器啟動後會再更新
       initF3InjectForm();
       
       // 清空各區域 DOM
-      document.getElementById("f5-report-content").innerHTML = "";
-      document.getElementById("f7-activity-feed").innerHTML = "";
-      document.getElementById("f7-basis-detail").innerHTML = "";
+      const f5Content = document.getElementById("f5-report-content");
+      if (f5Content) f5Content.innerHTML = "";
+      const f7Feed = document.getElementById("f7-activity-feed");
+      if (f7Feed) f7Feed.innerHTML = "";
+      const f7Basis = document.getElementById("f7-basis-detail");
+      if (f7Basis) f7Basis.innerHTML = "";
       
       // 強制清空 Activity 事件列表 DOM
       const activityEventList = document.getElementById("activity-event-list");
       if (activityEventList) {
         activityEventList.innerHTML = '<div class="activity-empty">尚無事件紀錄</div>';
-        console.log("[resetSystem] 已清空 activity-event-list DOM");
+        console.log("[_doResetSystem] 已清空 activity-event-list DOM");
       }
       
       // 清空報告 tabs
@@ -818,16 +787,32 @@ async function resetSystem() {
       const activityHeader = document.getElementById("activity-main-header");
       if (activityHeader) activityHeader.textContent = "選擇事件查看詳情";
       
-      console.log("[resetSystem] 系統重設完成，最終 _activityByEvent.size =", _activityByEvent.size);
-      alert("系統已重設");
+      console.log("[_doResetSystem] 系統重設完成，最終 _activityByEvent.size =", _activityByEvent.size);
+      
+      if (showAlert) {
+        alert("系統已重設");
+      }
+      return true;
     } else {
-      console.warn("[resetSystem] 後端回應非 ok:", data);
-      alert("重設失敗：" + (data.message || "未知錯誤"));
+      console.warn("[_doResetSystem] 後端回應非 ok:", data);
+      if (showAlert) {
+        alert("重設失敗：" + (data.message || "未知錯誤"));
+      }
+      return false;
     }
   } catch (e) {
-    console.error("[resetSystem] 重設失敗:", e);
-    alert("重設失敗");
+    console.error("[_doResetSystem] 重設失敗:", e);
+    if (showAlert) {
+      alert("重設失敗");
+    }
+    return false;
   }
+}
+
+// 重設系統狀態（帶確認對話框）
+async function resetSystem() {
+  if (!confirm("確定要重設系統？這會清空所有進行中的事件。")) return;
+  await _doResetSystem(true);
 }
 
 // 追蹤已注入的事件（避免重複注入）
@@ -1036,7 +1021,14 @@ function _renderReportTabs() {
   if (!tabsContainer) {
     tabsContainer = document.createElement("div");
     tabsContainer.id = "f5-report-tabs";
-    tabsContainer.style.cssText = "display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border);overflow-x:auto;flex-wrap:nowrap;";
+    tabsContainer.style.cssText = `
+      display: flex;
+      gap: 4px;
+      padding: 4px 10px 6px;
+      border-bottom: 1px solid var(--border);
+      overflow-x: auto;
+      flex-wrap: nowrap;
+    `;
     // 插入到 section-header 之後
     const header = section.querySelector(".section-header");
     if (header && header.nextSibling) {
@@ -1048,18 +1040,51 @@ function _renderReportTabs() {
 
   // 建立 tabs
   let tabsHtml = "";
+  let index = 1;
   for (const [eventId, dec] of _allDecisions) {
     const isActive = eventId === _currentEventId;
-    const label = dec.incident?.description || dec.incident?.type || eventId;
-    const shortLabel = label.length > 12 ? label.substring(0, 12) + "…" : label;
-    const levelColor = dec.level === "A" ? "var(--level-a)" : dec.level === "B" ? "var(--level-b)" : "var(--text-muted)";
+    const levelColor = dec.level === "A" ? "#dc2626" : dec.level === "B" ? "#f97316" : "#666";
+    const levelBg = dec.level === "A" ? "#fef2f2" : dec.level === "B" ? "#fff7ed" : "#f5f5f5";
+    
+    // 取得事件名稱（短版）
+    const typeName = _getShortType(dec.incident?.type) || "事件";
+    const location = dec.incident?.location || "";
+    const shortLocation = location.length > 4 ? location.substring(0, 4) + "…" : location;
+    const label = shortLocation ? `${typeName}·${shortLocation}` : typeName;
+    
     tabsHtml += `<button 
       onclick="switchReportTab('${escapeHtml(eventId)}')" 
-      style="padding:4px 10px;border-radius:4px;font-size:0.68rem;border:1px solid ${isActive ? levelColor : 'var(--border)'};
-             background:${isActive ? 'var(--bg-elevated)' : 'transparent'};color:${isActive ? levelColor : 'var(--text-muted)'};
-             cursor:pointer;white-space:nowrap;transition:all 0.15s;"
-      title="${escapeHtml(label)}"
-    >${shortLabel}</button>`;
+      style="
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 0.62rem;
+        font-weight: ${isActive ? '600' : '400'};
+        border: 1px solid ${isActive ? levelColor : 'var(--border)'};
+        background: ${isActive ? levelBg : 'var(--bg-card)'};
+        color: ${isActive ? levelColor : 'var(--text-secondary)'};
+        cursor: pointer;
+        white-space: nowrap;
+        transition: all 0.15s;
+        line-height: 1.5;
+      "
+      title="${escapeHtml(dec.incident?.description || eventId)}"
+      onmouseover="this.style.borderColor='${levelColor}';this.style.background='${levelBg}'"
+      onmouseout="if(!${isActive}){this.style.borderColor='var(--border)';this.style.background='var(--bg-card)'}"
+    >
+      <span style="
+        display: inline-block;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: ${levelColor};
+        flex-shrink: 0;
+      "></span>
+      ${escapeHtml(label)}
+    </button>`;
+    index++;
   }
   tabsContainer.innerHTML = tabsHtml;
 
@@ -1078,11 +1103,25 @@ function switchReportTab(eventId) {
   _renderReportTabs();
   _renderReportContent(decision);
   
-  // ★ 同步更新 F4 路網圖，顯示該事件的疏散路線和事件發生點
+  // ★ 同步更新 F4 路網圖
+  const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
+  console.log(`[switchReportTab] 切換地圖到事件 ${eventId}, 事件路段: ${incidentSegmentId}, routes: ${decision.routes ? '有' : '無'}`);
+  
   if (decision.routes) {
-    const incidentSegmentId = decision.incident?.affected_segment || decision.incident?.affected_road || null;
-    console.log(`[switchReportTab] 切換地圖到事件 ${eventId}, 事件路段: ${incidentSegmentId}`);
+    // 有疏散路線：顯示路線
     updateMap(decision.routes, incidentSegmentId);
+    if (typeof updateGeoMap === "function") updateGeoMap(decision.routes);
+  } else {
+    // 沒有疏散路線：清空地圖，只標示事件發生點
+    if (typeof clearMapRoutes === "function") clearMapRoutes();
+    if (typeof clearGeoMap === "function") clearGeoMap();
+    // 如果有事件路段，標示它（紅色）
+    if (incidentSegmentId) {
+      updateMap(null, incidentSegmentId);
+      if (typeof markIncidentOnGeoMap === "function") {
+        markIncidentOnGeoMap(decision.incident);
+      }
+    }
   }
 }
 
@@ -1577,6 +1616,10 @@ async function simStart() {
     // 注意：停止模擬時不清空事件框，事件仍然有效
     // 只有使用者點「重設系統」才會清空
   } else {
+    // ★ 啟動模擬前，先自動重設系統（不顯示 alert）
+    console.log("[simStart] 啟動模擬前自動重設系統...");
+    await _doResetSystem(false);
+    
     // 啟動模擬
     const speed = parseInt(document.getElementById("sim-speed-select").value) || 60;
     const result = await fetchSimulationStart(speed);
@@ -1663,9 +1706,10 @@ function onSimulationState(payload) {
     SimState.enabled = false;
     SimState.playing = false;
     SimState.currentTime = null;
-    // ★ 停止模擬時，顯示全部事件
+    // ★ 停止模擬時，清空事件列表並顯示提示
     _lastIncidentUpdateTime = null;
-    initF3InjectForm();  // 載入全部事件
+    _injectedEventIds.clear();  // 清除已注入標記
+    initF3InjectForm();  // 顯示「請啟動模擬器」提示
   } else if (action === "ended") {
     SimState.playing = false;
     SimState.currentTime = parseISOTime(payload.current_time);

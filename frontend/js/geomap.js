@@ -107,6 +107,22 @@ function initGeoMap() {
   container.innerHTML = GEO_SVG + legend;
 }
 
+/**
+ * 清空 GeoMap 路線（重設系統時呼叫）
+ * 將所有路段恢復為預設灰色
+ */
+function clearGeoMap() {
+  Object.values(SEG_IDS).forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.setAttribute("stroke", DEFAULT_COLOR);
+      el.setAttribute("stroke-width", String(DEFAULT_WIDTH));
+      el.setAttribute("opacity", "1");
+      el.removeAttribute("stroke-dasharray");
+    }
+  });
+}
+
 function updateGeoMap(routes) {
   if (!routes) return;
 
