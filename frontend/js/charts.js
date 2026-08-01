@@ -18,6 +18,9 @@ function trendChartOptions() {
   return {
     responsive: true,
     maintainAspectRatio: false,
+    layout: {
+      padding: { left: 12, right: 12, bottom: 6 },
+    },
     plugins: { legend: { display: false } },
     scales: {
       y: {
@@ -231,6 +234,9 @@ async function updateTrafficChartForIncident(decision) {
       options: {
       responsive: true,
       maintainAspectRatio: false,
+      layout: {
+        padding: { left: 10, right: 10, bottom: 10 },
+      },
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: {
@@ -262,7 +268,7 @@ async function updateTrafficChartForIncident(decision) {
           suggestedMax: 60,
           grid: { color: "rgba(107, 73, 50, 0.10)" },
           ticks: { color: "#665244", font: { size: 9 } },
-          title: { display: true, text: "km/h", color: "#665244", font: { size: 9 } },
+          title: { display: true, text: "km/h", color: "#665244", font: { size: 9 }, padding: { top: 0, bottom: 4 } },
         },
         ySaturation: {
           beginAtZero: true,
@@ -271,7 +277,7 @@ async function updateTrafficChartForIncident(decision) {
           position: "right",
           grid: { drawOnChartArea: false },
           ticks: { color: "#A85E34", font: { size: 9 } },
-          title: { display: true, text: "Saturation", color: "#A85E34", font: { size: 9 } },
+          title: { display: true, text: "Saturation", color: "#A85E34", font: { size: 9 }, padding: { top: 0, bottom: 4 } },
         },
       },
       },

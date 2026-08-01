@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/frontend/css/chat-variables.css" />
-  <link rel="stylesheet" href="/frontend/css/styles.css" />
+  <link rel="stylesheet" href="/frontend/css/styles.css?v=left-padding-30-alert-bottom-13" />
   <link rel="stylesheet" href="/frontend/css/chat-panel.css" />
   <link rel="stylesheet" href="/frontend/css/chat-messages.css" />
   <link rel="stylesheet" href="/frontend/css/chat-cards.css" />
@@ -31,10 +31,9 @@
     </div>
   </header>
 
-  <!-- Side Navigation -->
-  <aside class="side-nav-shell" aria-label="主要頁面導覽">
-    <button class="side-nav-toggle" type="button" onclick="toggleSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
-      <span>‹</span>
+  <aside class="right-side-nav" aria-label="主要頁面導覽">
+    <button class="right-side-nav-toggle" type="button" onclick="toggleRightSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
+      <span>›</span>
     </button>
     <div class="side-nav-title">Workspace</div>
     <nav class="page-nav" id="page-nav">
@@ -70,10 +69,8 @@
         <!-- KPI Row -->
         <section class="section" id="f1-kpi">
           <div class="kpi-card" data-kpi="active_incident_count"></div>
+          <div class="kpi-card" data-kpi="latest_injected_event"></div>
           <div class="kpi-card" data-kpi="current_level"></div>
-          <div class="kpi-card" data-kpi="average_saturation"></div>
-          <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
-          <div class="kpi-card" data-kpi="system_mode"></div>
         </section>
 
         <!-- Chart -->
@@ -256,9 +253,9 @@
   <script src="/frontend/js/api.js"></script>
   <script src="/frontend/js/ws.js"></script>
   <script src="/frontend/vendor/chart.umd.js"></script>
-  <script src="/frontend/js/charts.js?v=incident-neighbors-3"></script>
+  <script src="/frontend/js/charts.js?v=chart-axis-visible-5"></script>
   <script src="/frontend/js/map.js"></script>
   <script src="/frontend/js/chat-app.js"></script>
-  <script src="/frontend/js/app.js?v=traffic-event-bars-2"></script>
+  <script src="/frontend/js/app.js?v=collapsible-right-sidebar-10"></script>
 </body>
 </html>

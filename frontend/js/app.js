@@ -14,7 +14,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initF3InjectForm();
   initHeaderClock();
   initExpandReportBtn();
-  initSideNav();
+  initRightSideNav();
   initPageNav();
   initSimulation();
 
@@ -52,37 +52,37 @@ function initPageNav() {
   // 頁面切換已在 HTML onclick 處理，這裡可加額外初始化邏輯
 }
 
-function setSideNavCollapsed(collapsed) {
-  const sidebar = document.querySelector(".side-nav-shell");
-  const toggle = document.querySelector(".side-nav-toggle");
+function setRightSideNavCollapsed(collapsed) {
+  const sidebar = document.querySelector(".right-side-nav");
+  const toggle = document.querySelector(".right-side-nav-toggle");
   if (!sidebar || !toggle) return;
 
   sidebar.classList.toggle("collapsed", collapsed);
-  document.body.classList.toggle("side-nav-collapsed", collapsed);
+  document.body.classList.toggle("right-side-nav-collapsed", collapsed);
   toggle.setAttribute("aria-expanded", String(!collapsed));
   toggle.setAttribute("aria-label", collapsed ? "展開側邊欄" : "收縮側邊欄");
   toggle.title = collapsed ? "展開側邊欄" : "收縮側邊欄";
 }
 
-function initSideNav() {
+function initRightSideNav() {
   let collapsed = false;
   try {
-    collapsed = localStorage.getItem("citynexus-side-nav-collapsed") === "true";
-  } catch (e) {
-    console.warn("無法讀取側邊欄偏好:", e);
+    collapsed = localStorage.getItem("citynexus-right-side-nav-collapsed") === "true";
+  } catch (error) {
+    console.warn("無法讀取右側欄偏好:", error);
   }
-  setSideNavCollapsed(collapsed);
+  setRightSideNavCollapsed(collapsed);
 }
 
-function toggleSideNav() {
-  const sidebar = document.querySelector(".side-nav-shell");
+function toggleRightSideNav() {
+  const sidebar = document.querySelector(".right-side-nav");
   if (!sidebar) return;
   const collapsed = !sidebar.classList.contains("collapsed");
-  setSideNavCollapsed(collapsed);
+  setRightSideNavCollapsed(collapsed);
   try {
-    localStorage.setItem("citynexus-side-nav-collapsed", String(collapsed));
-  } catch (e) {
-    console.warn("無法儲存側邊欄偏好:", e);
+    localStorage.setItem("citynexus-right-side-nav-collapsed", String(collapsed));
+  } catch (error) {
+    console.warn("無法儲存右側欄偏好:", error);
   }
 }
 
@@ -110,22 +110,45 @@ function switchPage(pageName) {
 }
 
 // --- F1 KPI ---
+const _injectedEventNames = new Map();
+let _activeIncidentCount = 0;
+
+function _formatInjectedEventName(incident) {
+  if (!incident) return "未知事件";
+  const typeName = _getShortType(incident.type || "未知事件");
+  return incident.location ? `${typeName}（${incident.location}）` : typeName;
+}
+
+function _renderInjectedEventsKpi() {
+  const card = document.querySelector('.kpi-card[data-kpi="latest_injected_event"]');
+  if (!card) return;
+  const names = [..._injectedEventNames.values()];
+  const content = names.length
+    ? names.map((name) => `<div class="kpi-event-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>`).join("")
+    : '<div class="kpi-event-empty">尚未注入</div>';
+  card.innerHTML = `<div class="kpi-value kpi-event-list">${content}</div><div class="kpi-label">事件注入名稱</div>`;
+}
+
+function _recordInjectedEvent(decision) {
+  const incident = decision?.incident;
+  const eventId = incident?.event_id || decision?.trace_id;
+  if (!eventId) return;
+  _injectedEventNames.set(eventId, _formatInjectedEventName(incident));
+  _renderInjectedEventsKpi();
+}
+
 function renderKpis(kpis) {
   if (!kpis) return;
-  const cards = document.querySelectorAll(".kpi-card");
   const values = [
-    { key: "active_incident_count", label: "進行中事件", value: kpis.active_incident_count ?? 0 },
+    { key: "active_incident_count", label: "進行中事件", value: _activeIncidentCount },
     { key: "current_level", label: "最高應變等級", value: kpis.current_level || "正常" },
-    { key: "average_saturation", label: "平均飽和度", value: kpis.average_saturation != null ? (kpis.average_saturation * 100).toFixed(1) + "%" : "N/A" },
-    { key: "multilingual_alert_count", label: "多語通報站點", value: kpis.multilingual_alert_count ?? 0 },
-    { key: "system_mode", label: "系統模式", value: kpis.system_mode === "live" ? "Live" : "Degraded" },
   ];
 
-  cards.forEach((card, i) => {
-    if (values[i]) {
-      card.innerHTML = `<div class="kpi-value">${values[i].value}</div><div class="kpi-label">${values[i].label}</div>`;
-    }
+  values.forEach(({ key, label, value }) => {
+    const card = document.querySelector(`.kpi-card[data-kpi="${key}"]`);
+    if (card) card.innerHTML = `<div class="kpi-value" title="${escapeHtml(String(value))}">${escapeHtml(String(value))}</div><div class="kpi-label">${label}</div>`;
   });
+  _renderInjectedEventsKpi();
 }
 
 // --- Dashboard 整合渲染 ---
@@ -185,14 +208,14 @@ function onDecisionCompleted(decision) {
   // 更新 F7 決策依據
   renderDecisionBasis(decision);
   // 更新 KPI（事件數）
-  const countCard = document.querySelectorAll(".kpi-card")[0];
+  const countCard = document.querySelector('.kpi-card[data-kpi="active_incident_count"]');
   if (countCard) {
-    const current = parseInt(countCard.querySelector(".kpi-value")?.textContent || "0");
-    countCard.innerHTML = `<div class="kpi-value">${current + 1}</div><div class="kpi-label">進行中事件</div>`;
+    _activeIncidentCount += 1;
+    countCard.innerHTML = `<div class="kpi-value">${_activeIncidentCount}</div><div class="kpi-label">進行中事件</div>`;
   }
   // 更新等級 KPI
   if (decision.level) {
-    const levelCard = document.querySelectorAll(".kpi-card")[1];
+    const levelCard = document.querySelector('.kpi-card[data-kpi="current_level"]');
     if (levelCard) {
       const color = decision.level === "A" ? "var(--level-a)" : "var(--level-b)";
       levelCard.innerHTML = `<div class="kpi-value" style="color:${color}">${decision.level}</div><div class="kpi-label">最高應變等級</div>`;
@@ -307,20 +330,12 @@ function selectIncidentFromList(eventId) {
 function onRulesEvaluated(sensing) {
   if (!sensing) return;
   // 更新 KPI：最高應變等級
-  const levelCard = document.querySelectorAll(".kpi-card")[1];
+  const levelCard = document.querySelector('.kpi-card[data-kpi="current_level"]');
   if (levelCard && sensing.traffic_level) {
     const displayLevel = sensing.traffic_level === "normal" ? "正常" : sensing.traffic_level;
     levelCard.innerHTML = `<div class="kpi-value">${displayLevel}</div><div class="kpi-label">最高應變等級</div>`;
   }
   // 更新 KPI：多語通報站點（從 rule_hits 計算 SOP-6 命中數）
-  if (sensing.rule_hits) {
-    const sop6Count = sensing.rule_hits.filter(h => h.clause_id === "SOP-6").length;
-    const multiCard = document.querySelectorAll(".kpi-card")[3];
-    if (multiCard) {
-      multiCard.innerHTML = `<div class="kpi-value">${sop6Count}</div><div class="kpi-label">多語通報站點</div>`;
-    }
-  }
-  
   // 更新飽和地圖資料（從 segment_snapshots 或 traffic_samples）
   if (sensing.segment_snapshots && typeof updateSaturationFromSamples === "function") {
     updateSaturationFromSamples(sensing.segment_snapshots);
@@ -560,6 +575,8 @@ function renderIncidentButtons(form) {
 // 重新載入事件列表
 async function reloadIncidentList() {
   _injectedEventIds.clear();  // 清除已注入標記
+  _injectedEventNames.clear();
+  _renderInjectedEventsKpi();
   await initF3InjectForm();
 }
 
@@ -585,6 +602,7 @@ async function generateRandomIncident() {
     const data = await res.json();
     if (data.status === "ok" && data.payload) {
       const decision = data.payload;
+      _recordInjectedEvent(decision);
       onDecisionCompleted(decision);
       // 彈窗由 WebSocket decision.alert.v1 推播觸發，這裡不重複呼叫
     } else if (data.errors) {
@@ -610,6 +628,9 @@ async function resetSystem() {
     if (data.status === "ok") {
       // 清空前端狀態（使用多種方式確保徹底清空）
       _injectedEventIds.clear();
+      _injectedEventNames.clear();
+      _activeIncidentCount = 0;
+      _renderInjectedEventsKpi();
       _allDecisions.clear();
       _activityByEvent.clear();
       _processedTraceIds.clear();
@@ -699,7 +720,7 @@ async function injectIncident(eventId) {
     if (data.status === "ok" && data.payload) {
       const decision = data.payload;
       console.log(`[injectIncident] decision.routes:`, decision.routes);
-      
+      _recordInjectedEvent(decision);
       onDecisionCompleted(decision);
       
       // ★ 確保地圖立即更新（傳入事件發生的路段 ID）
@@ -1746,12 +1767,10 @@ function _showIncidentResolvedAlert(payload) {
 }
 
 function _updateKpiAfterResolve() {
-  const countCard = document.querySelectorAll(".kpi-card")[0];
+  const countCard = document.querySelector('.kpi-card[data-kpi="active_incident_count"]');
   if (countCard) {
-    const current = parseInt(countCard.querySelector(".kpi-value")?.textContent || "0");
-    if (current > 0) {
-      countCard.innerHTML = `<div class="kpi-value">${current - 1}</div><div class="kpi-label">進行中事件</div>`;
-    }
+    _activeIncidentCount = Math.max(0, _activeIncidentCount - 1);
+    countCard.innerHTML = `<div class="kpi-value">${_activeIncidentCount}</div><div class="kpi-label">進行中事件</div>`;
   }
 }
 
