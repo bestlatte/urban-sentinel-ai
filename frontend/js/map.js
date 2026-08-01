@@ -7,6 +7,16 @@
 let mapGeometry = null;
 let mapTopology = null;
 
+/**
+ * 清空地圖路線（重設系統時呼叫）
+ */
+function clearMapRoutes() {
+  const container = document.getElementById("f4-map");
+  if (container) {
+    renderMap(container, null, null);
+  }
+}
+
 async function initMap() {
   const container = document.getElementById("f4-map");
   if (!container) return;
@@ -26,7 +36,7 @@ async function initMap() {
   renderMap(container);
 }
 
-function renderMap(container, routes) {
+function renderMap(container, routes, incidentSegmentId = null) {
   if (!mapGeometry) {
     container.innerHTML = `<div style="color:hsl(0,0%,40%);text-align:center;padding:60px 0;font-size:0.8rem">Road network loading...</div>`;
     return;
@@ -53,6 +63,14 @@ function renderMap(container, routes) {
   mappedPoints.forEach((p) => { posMap[p.segment_id] = p; });
 
   let svg = `<svg viewBox="${vb}" style="width:100%;height:100%" xmlns="http://www.w3.org/2000/svg">`;
+  
+  // 定義事件點的動態光暈效果
+  svg += `<defs>
+    <radialGradient id="incident-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:hsl(0,84%,60%);stop-opacity:0.8"/>
+      <stop offset="100%" style="stop-color:hsl(0,84%,60%);stop-opacity:0"/>
+    </radialGradient>
+  </defs>`;
 
   // 繪製連線（alternatives 關係）
   if (mapTopology) {
@@ -66,9 +84,9 @@ function renderMap(container, routes) {
         const edgeKey = [seg.segment_id, altId].sort().join("-");
         if (drawnEdges.has(edgeKey)) return;
         drawnEdges.add(edgeKey);
-        const edgeColor = getEdgeColor(seg.segment_id, altId, routes);
+        const edgeColor = getEdgeColor(seg.segment_id, altId, routes, incidentSegmentId);
         const edgeDash = getEdgeDash(seg.segment_id, altId, routes);
-        const edgeWidth = getEdgeWidth(seg.segment_id, altId, routes);
+        const edgeWidth = getEdgeWidth(seg.segment_id, altId, routes, incidentSegmentId);
         svg += `<line x1="${from.mx}" y1="${from.my}" x2="${to.mx}" y2="${to.my}" stroke="${edgeColor}" stroke-width="${edgeWidth}" stroke-dasharray="${edgeDash}" opacity="0.5"/>`;
       });
     });
@@ -76,37 +94,80 @@ function renderMap(container, routes) {
 
   // 繪製節點
   mappedPoints.forEach((p) => {
-    const color = getSegmentColor(p.segment_id, routes);
-    const r = getNodeRadius(p.segment_id, routes);
+    const isIncident = p.segment_id === incidentSegmentId;
+    const color = getSegmentColor(p.segment_id, routes, incidentSegmentId);
+    const r = getNodeRadius(p.segment_id, routes, incidentSegmentId);
+    
+    // 事件發生點：加上動態光暈效果
+    if (isIncident) {
+      // 外圈光暈
+      svg += `<circle cx="${p.mx}" cy="${p.my}" r="${r + 12}" fill="url(#incident-glow)" opacity="0.6">
+        <animate attributeName="r" values="${r + 8};${r + 15};${r + 8}" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="opacity" values="0.6;0.3;0.6" dur="2s" repeatCount="indefinite"/>
+      </circle>`;
+      // 中圈
+      svg += `<circle cx="${p.mx}" cy="${p.my}" r="${r + 4}" fill="hsl(0,84%,60%)" opacity="0.3"/>`;
+    }
+    
+    // 主節點
     svg += `<circle cx="${p.mx}" cy="${p.my}" r="${r}" fill="${color}" opacity="0.9"/>`;
+    
+    // 事件點加上 X 標記
+    if (isIncident) {
+      const xSize = r * 0.5;
+      svg += `<line x1="${p.mx - xSize}" y1="${p.my - xSize}" x2="${p.mx + xSize}" y2="${p.my + xSize}" stroke="white" stroke-width="2" stroke-linecap="round"/>`;
+      svg += `<line x1="${p.mx + xSize}" y1="${p.my - xSize}" x2="${p.mx - xSize}" y2="${p.my + xSize}" stroke="white" stroke-width="2" stroke-linecap="round"/>`;
+    }
+    
     // 標籤
     const label = (p.$note || p.segment_id).replace(/，.*/, "").replace(/（.*）/, "");
-    svg += `<text x="${p.mx}" y="${p.my + r + 14}" text-anchor="middle" fill="hsl(0,0%,50%)" font-size="11" font-family="-apple-system,sans-serif">${escapeHtml(label)}</text>`;
+    const labelColor = isIncident ? "hsl(0,84%,70%)" : "hsl(0,0%,50%)";
+    const labelWeight = isIncident ? "font-weight='600'" : "";
+    svg += `<text x="${p.mx}" y="${p.my + r + 16}" text-anchor="middle" fill="${labelColor}" font-size="14" font-weight="500" ${labelWeight} font-family="-apple-system,Noto Sans TC,sans-serif">${escapeHtml(label)}</text>`;
   });
 
   svg += `</svg>`;
 
-  // 圖例
-  const legend = `<div style="position:absolute;bottom:12px;right:16px;display:flex;gap:12px;font-size:0.65rem;color:hsl(0,0%,50%)">
-    <span><span style="color:hsl(142,71%,45%)">●</span> 主線</span>
-    <span><span style="color:hsl(48,96%,53%)">●</span> 次線</span>
-    <span><span style="color:hsl(0,84%,60%)">●</span> 封閉</span>
-    <span><span style="color:hsl(0,0%,30%)">●</span> 一般</span>
+  // 圖例（加上事件點說明）
+  const legend = `<div style="position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:flex;gap:18px;font-size:0.82rem;color:var(--text-secondary,#34271D);background:var(--bg-card,#F3E8D7);border:1px solid var(--border,#B78E62);border-radius:8px;padding:8px 20px;font-weight:500;">
+    <span><span style="color:hsl(0,84%,60%);font-size:1rem">✕</span> 事件</span>
+    <span><span style="color:hsl(142,71%,45%);font-size:1rem">●</span> 主線</span>
+    <span><span style="color:hsl(48,96%,53%);font-size:1rem">●</span> 次線</span>
+    <span><span style="color:hsl(0,84%,60%);font-size:1rem">●</span> 封閉</span>
+    <span><span style="color:hsl(0,0%,30%);font-size:1rem">●</span> 一般</span>
   </div>`;
 
   container.innerHTML = svg + legend;
 }
 
-function getEdgeColor(fromId, toId, routes) {
-  if (!routes) return "hsl(0,0%,18%)";
+function getEdgeColor(fromId, toId, routes, incidentSegmentId = null) {
+  if (!routes) {
+    // 沒有路線規劃時，事件路段的連線才變紅
+    if (incidentSegmentId && (fromId === incidentSegmentId || toId === incidentSegmentId)) {
+      return "hsl(0,84%,60%)";
+    }
+    return "hsl(0,0%,18%)";
+  }
+  
   const primary = routes.primary && routes.primary.segment_id;
   const secondary = routes.secondary && routes.secondary.segment_id;
   const closedIds = (routes.excluded || []).filter(e => e.reason_code === "CLOSED").map(e => e.segment_id);
 
-  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "hsl(0,84%,60%)";
+  // ★ 疏散路線優先級最高（不被紅線覆蓋）
+  // 主路線連線：綠色
   if ((fromId === primary && toId === secondary) || (toId === primary && fromId === secondary)) return "hsl(142,71%,45%)";
   if (fromId === primary || toId === primary) return "hsl(142,71%,45%)";
+  // 次路線連線：黃色
   if (fromId === secondary || toId === secondary) return "hsl(48,96%,53%)";
+  
+  // 封閉路段連線：紅色
+  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "hsl(0,84%,60%)";
+  
+  // 事件路段連線（但不是疏散路線）：紅色
+  if (incidentSegmentId && (fromId === incidentSegmentId || toId === incidentSegmentId)) {
+    return "hsl(0,84%,60%)";
+  }
+  
   return "hsl(0,0%,18%)";
 }
 
@@ -117,12 +178,31 @@ function getEdgeDash(fromId, toId, routes) {
   return "none";
 }
 
-function getEdgeWidth(fromId, toId, routes) {
-  if (!routes) return "1";
+function getEdgeWidth(fromId, toId, routes, incidentSegmentId = null) {
+  if (!routes) {
+    // 沒有路線規劃時，事件路段的連線才加粗
+    if (incidentSegmentId && (fromId === incidentSegmentId || toId === incidentSegmentId)) {
+      return "3";
+    }
+    return "1";
+  }
+  
   const primary = routes.primary && routes.primary.segment_id;
+  const secondary = routes.secondary && routes.secondary.segment_id;
   const closedIds = (routes.excluded || []).filter(e => e.reason_code === "CLOSED").map(e => e.segment_id);
-  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "2.5";
+  
+  // ★ 疏散路線優先級最高
   if (fromId === primary || toId === primary) return "2";
+  if (fromId === secondary || toId === secondary) return "1.5";
+  
+  // 封閉路段
+  if (closedIds.includes(fromId) || closedIds.includes(toId)) return "2.5";
+  
+  // 事件路段（但不是疏散路線）
+  if (incidentSegmentId && (fromId === incidentSegmentId || toId === incidentSegmentId)) {
+    return "3";
+  }
+  
   return "1";
 }
 
@@ -133,7 +213,12 @@ function _isSaturatedRetained(segId, routes) {
   );
 }
 
-function getSegmentColor(segId, routes) {
+function getSegmentColor(segId, routes, incidentSegmentId = null) {
+  // ★ 事件發生路段：紅色（最高優先級）
+  if (segId === incidentSegmentId) {
+    return "hsl(0, 84%, 60%)";
+  }
+  
   // 優先檢查飽和資料
   const satData = _saturationMapData[segId];
   if (satData && satData.level !== "normal") {
@@ -157,7 +242,12 @@ function getSegmentColor(segId, routes) {
   return "hsl(0,0%,30%)";
 }
 
-function getNodeRadius(segId, routes) {
+function getNodeRadius(segId, routes, incidentSegmentId = null) {
+  // ★ 事件發生路段：最大半徑
+  if (segId === incidentSegmentId) {
+    return 11;
+  }
+  
   // 優先檢查飽和資料
   const satData = _saturationMapData[segId];
   if (satData && satData.level !== "normal") {
@@ -174,16 +264,19 @@ function getNodeRadius(segId, routes) {
   return 6;
 }
 
-function updateMap(routes) {
+function updateMap(routes, incidentSegmentId = null) {
   const container = document.getElementById("f4-map");
   if (container) {
     _lastRoutes = routes; // 記憶最後的路線規劃結果
-    renderMap(container, routes);
+    _lastIncidentSegmentId = incidentSegmentId; // 記憶事件發生路段
+    renderMap(container, routes, incidentSegmentId);
   }
 }
 
 // 記憶最後的路線規劃結果，供飽和更新時使用
 let _lastRoutes = null;
+// 記憶事件發生的路段 ID
+let _lastIncidentSegmentId = null;
 
 // ========== Saturation Map ==========
 
@@ -429,9 +522,9 @@ function renderSaturationMap() {
     
     // 標籤
     const label = (p.$note || p.segment_id).replace(/，.*/, "").replace(/（.*）/, "");
-    svg += `<text x="${p.mx}" y="${p.my + r + 18}" text-anchor="middle" 
-                  fill="hsl(0,0%,65%)" font-size="12" font-weight="500"
-                  font-family="-apple-system,sans-serif">${escapeHtml(label)}</text>`;
+    svg += `<text x="${p.mx}" y="${p.my + r + 20}" text-anchor="middle" 
+                  fill="hsl(0,0%,65%)" font-size="14" font-weight="500"
+                  font-family="-apple-system,Noto Sans TC,sans-serif">${escapeHtml(label)}</text>`;
     
     // 飽和度數字（只顯示有資料的）
     if (satScore !== undefined) {

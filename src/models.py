@@ -531,6 +531,18 @@ class DecisionResult(BaseModel):
     這個欄位裝的是「接下來 60 分鐘會出什麼問題、什麼時候、依 SOP 該怎麼辦」，
     全部由 `src/risk_projection.py` 確定性算出，LLM 只負責寫成通順的段落。
     """
+    
+    # [2026-08-01新增] 同路段多事件合併資訊
+    merged_incident_info: dict | None = None
+    """同路段有多個事件時，包含合併事件的詳細資訊：
+    {
+        "event_ids": [...],
+        "count": int,
+        "max_ete_minutes": int,
+        "merged_ete_minutes": int,
+        "descriptions": [...],
+    }
+    """
 
 
 class KpiSummary(BaseModel):

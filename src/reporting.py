@@ -165,10 +165,36 @@ def _generate_c1_c3_fallback(
     route_plan: RoutePlan | None,
     ete: EteEstimate,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> str:
-    """USE_BEDROCK=false 保底模板：用固定格式組裝建議書，不呼叫 LLM。"""
+    """USE_BEDROCK=false 保底模板：用固定格式組裝建議書，不呼叫 LLM。
+    
+    [2026-08-01新增] merged_incident_info：同路段多事件合併時顯示所有事件資訊。
+    """
     parts = []
-    parts.append(f"【交控建議書】事件 {incident.event_id}")
+    
+    # ★ 情境1：同路段多事件合併報告
+    if merged_incident_info and merged_incident_info.get("count", 0) > 1:
+        parts.append("═" * 50)
+        parts.append("【⚠️ 同路段多事件合併交控建議書】")
+        parts.append("═" * 50)
+        parts.append(f"合併事件數量：{merged_incident_info['count']} 件")
+        parts.append(f"合併事件ID：{', '.join(merged_incident_info['event_ids'])}")
+        parts.append("")
+        parts.append("【各事件詳情】")
+        for i, (eid, desc) in enumerate(zip(merged_incident_info['event_ids'], merged_incident_info.get('descriptions', [])), 1):
+            parts.append(f"  {i}. {eid}: {desc}")
+        parts.append("")
+        parts.append("【ETE 合併計算說明】")
+        parts.append(f"  • 各事件最大 ETE：{merged_incident_info['max_ete_minutes']} 分鐘")
+        parts.append(f"  • 多事件協調延遲：+{(merged_incident_info['count'] - 1) * 15} 分鐘")
+        parts.append(f"    （每多一事件增加 15 分鐘協調時間）")
+        parts.append(f"  • 合併後總 ETE：{merged_incident_info['merged_ete_minutes']} 分鐘")
+        parts.append("─" * 50)
+        parts.append("")
+    else:
+        parts.append(f"【交控建議書】事件 {incident.event_id}")
+    
     parts.append(f"事件描述：{incident.description}（{incident.location}）")
     parts.append(f"命中條款：{', '.join(sorted({h.clause_id for h in sensing.rule_hits}))}")
     parts.append(f"交通分級：{sensing.traffic_level} 級")
@@ -239,18 +265,159 @@ def _generate_c4_fallback(
     ete: EteEstimate,
     multilingual: bool,
 ) -> Notification:
-    """USE_BEDROCK=false 保底模板：固定格式簡訊（含日文/韓文加分項）。"""
-    route_name = route_plan.primary.name if (route_plan and route_plan.primary) else "請依現場指揮"
-    zh = f"交通事故通知：{incident.location}發生{incident.type}，建議改道{route_name}，預計{ete.minutes}分鐘後恢復。"
+    """USE_BEDROCK=false 保底模板：固定格式簡訊（含日文/韓文加分項）。
+    
+    多語版本會將地點、事件類型、改道建議翻譯成對應語言。
+    """
+    route_name_zh = route_plan.primary.name if (route_plan and route_plan.primary) else "請依現場指揮"
+    
+    # 事件類型翻譯對照表
+    type_translations = {
+        "Road_Collapse_Accident": {
+            "zh": "路面塌陷事故",
+            "en": "road collapse",
+            "ja": "路面陥没事故",
+            "ko": "도로 붕괴 사고",
+        },
+        "Traffic_Accident": {
+            "zh": "交通事故",
+            "en": "traffic accident",
+            "ja": "交通事故",
+            "ko": "교통사고",
+        },
+        "Crowd_Surge_Injury": {
+            "zh": "人群推擠傷亡",
+            "en": "crowd surge incident",
+            "ja": "群衆事故",
+            "ko": "군중 밀집 사고",
+        },
+        "Power_Failure": {
+            "zh": "號誌故障",
+            "en": "signal malfunction",
+            "ja": "信号機故障",
+            "ko": "신호등 고장",
+        },
+        "Vehicle_Fire": {
+            "zh": "車輛起火",
+            "en": "vehicle fire",
+            "ja": "車両火災",
+            "ko": "차량 화재",
+        },
+        "Large_Event_Dispersal": {
+            "zh": "大型活動散場",
+            "en": "large event dispersal",
+            "ja": "大型イベント終了",
+            "ko": "대형 행사 산개",
+        },
+    }
+    
+    # 常見地點翻譯對照表
+    location_translations = {
+        "捷運國父紀念館站": {
+            "en": "Sun Yat-sen Memorial Hall MRT Station",
+            "ja": "MRT国父記念館駅",
+            "ko": "국부기념관역",
+        },
+        "捷運市政府站": {
+            "en": "Taipei City Hall MRT Station",
+            "ja": "MRT市政府駅",
+            "ko": "시청역",
+        },
+        "台北101": {
+            "en": "Taipei 101",
+            "ja": "台北101",
+            "ko": "타이베이 101",
+        },
+        "大巨蛋": {
+            "en": "Taipei Dome",
+            "ja": "台北ドーム",
+            "ko": "타이베이 돔",
+        },
+        "信義威秀": {
+            "en": "Shin Kong Mitsukoshi Xinyi",
+            "ja": "信義エリア",
+            "ko": "신의 지구",
+        },
+        "光復南路": {
+            "en": "Guangfu South Road",
+            "ja": "光復南路",
+            "ko": "광푸남로",
+        },
+        "忠孝東路": {
+            "en": "Zhongxiao East Road",
+            "ja": "忠孝東路",
+            "ko": "중샤오동로",
+        },
+        "市民大道": {
+            "en": "Civic Boulevard",
+            "ja": "市民大道",
+            "ko": "시민대로",
+        },
+        "基隆路": {
+            "en": "Keelung Road",
+            "ja": "基隆路",
+            "ko": "지룽로",
+        },
+        "松高路": {
+            "en": "Songgao Road",
+            "ja": "松高路",
+            "ko": "송가오로",
+        },
+    }
+    
+    # 無替代路線時的翻譯
+    no_route_translations = {
+        "zh": "請依現場指揮",
+        "en": "follow on-site instructions",
+        "ja": "現場の指示に従ってください",
+        "ko": "현장 지시에 따르세요",
+    }
+    
+    def translate_location(loc: str, lang: str) -> str:
+        """嘗試翻譯地點名稱，找不到則保留原文。"""
+        if lang == "zh":
+            return loc
+        for zh_key, trans in location_translations.items():
+            if zh_key in loc:
+                return loc.replace(zh_key, trans.get(lang, zh_key))
+        return loc  # 找不到翻譯，保留原文
+    
+    def get_type_text(t: str, lang: str) -> str:
+        """取得事件類型的翻譯文字。"""
+        if t in type_translations:
+            return type_translations[t].get(lang, t)
+        return t
+    
+    def get_route_name(lang: str) -> str:
+        """取得改道建議的翻譯文字。"""
+        if route_plan and route_plan.primary:
+            return translate_location(route_plan.primary.name, lang)
+        return no_route_translations.get(lang, "請依現場指揮")
+    
+    # 中文版（必填）
+    type_zh = get_type_text(incident.type, "zh")
+    zh = f"交通事故通知：{incident.location}發生{type_zh}，建議改道{route_name_zh}，預計{ete.minutes}分鐘後恢復。"
 
     en: str | None = None
     ja: str | None = None
     ko: str | None = None
 
     if multilingual:
-        en = f"Traffic alert: incident at {incident.location}, suggested detour via {route_name}, ETA {ete.minutes} min."
-        ja = f"交通警報：{incident.location}で事故発生。迂回路：{route_name}、復旧予定：{ete.minutes}分後。"
-        ko = f"교통 알림: {incident.location}에서 사고 발생. 우회 경로: {route_name}, 예상 복구: {ete.minutes}분 후."
+        loc_en = translate_location(incident.location, "en")
+        loc_ja = translate_location(incident.location, "ja")
+        loc_ko = translate_location(incident.location, "ko")
+        
+        type_en = get_type_text(incident.type, "en")
+        type_ja = get_type_text(incident.type, "ja")
+        type_ko = get_type_text(incident.type, "ko")
+        
+        route_en = get_route_name("en")
+        route_ja = get_route_name("ja")
+        route_ko = get_route_name("ko")
+        
+        en = f"Traffic alert: {type_en} at {loc_en}. Suggested detour via {route_en}. ETA {ete.minutes} min."
+        ja = f"交通警報：{loc_ja}で{type_ja}発生。迂回路：{route_ja}、復旧予定：{ete.minutes}分後。"
+        ko = f"교통 알림: {loc_ko}에서 {type_ko} 발생. 우회 경로: {route_ko}, 예상 복구: {ete.minutes}분 후."
 
     return Notification(zh=zh, en=en, ja=ja, ko=ko)
 
@@ -262,6 +429,7 @@ def generate_report(
     ete: EteEstimate,
     advisory: BedrockAdvisory | None,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> tuple[str | None, Notification | None]:
     """C1-C4：LLM 生成，唯讀轉換——只能表達已經算好的事實，不得改寫任何數字/路段/條款編號。
 
@@ -377,12 +545,26 @@ def _generate_with_llm(
     route_plan: RoutePlan | None,
     ete: EteEstimate,
     bundle: NormalizedDataBundle,
+    merged_incident_info: dict | None = None,
 ) -> str:
     """使用 Bedrock LLM 生成 C1-C3 建議書。"""
     from src.risk_projection import build_risk_block, project_risks
 
     system_prompt = _load_prompt("report.txt")
     facts_block = build_facts_block(incident, sensing, route_plan, ete, bundle)
+    
+    # 如果有合併事件，加入合併資訊
+    if merged_incident_info and merged_incident_info.get("count", 0) > 1:
+        merged_block = (
+            f"\n\n【同路段多事件合併資訊】\n"
+            f"合併事件數量: {merged_incident_info['count']} 件\n"
+            f"合併事件ID: {', '.join(merged_incident_info['event_ids'])}\n"
+            f"各事件最大 ETE: {merged_incident_info['max_ete_minutes']} 分鐘\n"
+            f"合併後總 ETE: {merged_incident_info['merged_ete_minutes']} 分鐘\n"
+            f"（計算方式: max(各事件ETE) + (事件數-1)×15分鐘）"
+        )
+        facts_block += merged_block
+    
 
     # [2026-08-01] 二階效應推演一併注入。跟事實區塊同樣是「LLM 只能引用、
     # 不能改寫」——風險的時間點、數值、對策全部由 `risk_projection` 算好。

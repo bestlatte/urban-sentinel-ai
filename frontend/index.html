@@ -8,12 +8,18 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/frontend/css/chat-variables.css" />
-  <link rel="stylesheet" href="/frontend/css/styles.css" />
+  <link rel="stylesheet" href="/frontend/css/styles.css?v=left-padding-30-alert-bottom-13" />
   <link rel="stylesheet" href="/frontend/css/chat-panel.css" />
   <link rel="stylesheet" href="/frontend/css/chat-messages.css" />
   <link rel="stylesheet" href="/frontend/css/chat-cards.css" />
   <link rel="stylesheet" href="/frontend/css/chat-input.css" />
   <link rel="stylesheet" href="/frontend/css/chat-loading.css" />
+  <style>
+    #f4-geomap { height: 440px; border-radius: 10px; overflow: hidden; background: #F3E8D7; }
+    .map-tabs button { padding: 5px 14px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); border-radius: 6px; font-size: 0.72rem; font-family: var(--font); cursor: pointer; transition: all 0.15s; }
+    .map-tabs button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .map-tabs button:not(.active):hover { background: var(--bg-elevated); color: var(--text); }
+  </style>
   <link rel="stylesheet" href="/frontend/css/markdown.css" />
   <link rel="stylesheet" href="/frontend/css/cycle-progress.css" />
   <link rel="stylesheet" href="/frontend/css/reasoning-chain.css" />
@@ -27,21 +33,6 @@
       <div class="header-title">CityNexus</div>
       <div class="header-subtitle">Traffic Command Center</div>
     </div>
-    <!-- Page Navigation -->
-    <nav class="page-nav" id="page-nav">
-      <button class="page-nav-btn active" data-page="dashboard" onclick="switchPage('dashboard')">
-        <span class="page-nav-icon">📊</span>
-        <span class="page-nav-label">Dashboard</span>
-      </button>
-      <button class="page-nav-btn" data-page="saturation" onclick="switchPage('saturation')">
-        <span class="page-nav-icon">🗺️</span>
-        <span class="page-nav-label">Saturation Map</span>
-      </button>
-      <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')">
-        <span class="page-nav-icon">📋</span>
-        <span class="page-nav-label">Activity Log</span>
-      </button>
-    </nav>
     <div class="header-right">
       <div class="header-indicator">
         <span class="status-dot"></span>
@@ -50,6 +41,35 @@
       <div class="header-clock" id="header-time"></div>
     </div>
   </header>
+
+  <aside class="right-side-nav" aria-label="主要頁面導覽">
+    <button class="right-side-nav-toggle" type="button" onclick="toggleRightSideNav()" aria-label="收縮側邊欄" aria-expanded="true" title="收縮側邊欄">
+      <span>›</span>
+    </button>
+    <div class="side-nav-title">Workspace</div>
+    <nav class="page-nav" id="page-nav">
+      <button class="page-nav-btn active" data-page="dashboard" onclick="switchPage('dashboard')" title="Dashboard">
+        <span class="page-nav-icon">📊</span>
+        <span class="page-nav-label">Dashboard</span>
+      </button>
+      <button class="page-nav-btn" data-page="saturation" onclick="switchPage('saturation')" title="Saturation Map">
+        <span class="page-nav-icon">🗺️</span>
+        <span class="page-nav-label">Saturation Map</span>
+      </button>
+      <button class="page-nav-btn" data-page="activity" onclick="switchPage('activity')" title="Activity Log">
+        <span class="page-nav-icon">📋</span>
+        <span class="page-nav-label">Activity Log</span>
+      </button>
+      <button class="page-nav-btn" data-page="reports" onclick="switchPage('reports')" title="Reports">
+        <span class="page-nav-icon">📄</span>
+        <span class="page-nav-label">Reports</span>
+      </button>
+    </nav>
+    <div class="side-nav-footer">
+      <span class="status-dot"></span>
+      <span>System online</span>
+    </div>
+  </aside>
 
   <!-- Page: Dashboard (default) -->
   <div class="page-content" id="page-dashboard">
@@ -60,10 +80,8 @@
         <!-- KPI Row -->
         <section class="section" id="f1-kpi">
           <div class="kpi-card" data-kpi="active_incident_count"></div>
+          <div class="kpi-card" data-kpi="latest_injected_event"></div>
           <div class="kpi-card" data-kpi="current_level"></div>
-          <div class="kpi-card" data-kpi="average_saturation"></div>
-          <div class="kpi-card" data-kpi="multilingual_alert_count"></div>
-          <div class="kpi-card" data-kpi="system_mode"></div>
         </section>
 
         <!-- Chart -->
@@ -71,9 +89,17 @@
           <div class="section-header">Traffic Flow</div>
         </section>
 
-        <!-- Road Network -->
-        <section class="section card" id="f4-map">
-          <div class="section-header">Road Network Topology</div>
+        <!-- Road Network (tabbed view) -->
+        <section class="section card" id="f4-container" style="padding:0;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px 0">
+            <div class="section-header" style="margin-bottom:0">Road Network</div>
+            <div class="map-tabs" style="display:flex;gap:4px">
+              <button class="map-tab active" onclick="switchMapTab('schematic')">Schematic</button>
+              <button class="map-tab" onclick="switchMapTab('geographic')">Geographic</button>
+            </div>
+          </div>
+          <div id="f4-map" style="padding:16px 20px"></div>
+          <div id="f4-geomap" style="display:none"></div>
         </section>
       </div>
 
@@ -116,40 +142,12 @@
 
         <!-- Event Injection -->
         <section class="section card" id="f3-inject">
-          <div class="section-header">Event Injection</div>
-          <form id="incident-inject-form"></form>
-        </section>
-
-        <!-- Active Incidents by Level -->
-        <section class="section card" id="f2-incidents-panel">
-          <div class="section-header">Active Incidents</div>
-          <div class="incidents-grid">
-            <div class="incident-box level-a collapsed" id="incident-box-a">
-              <div class="incident-box-header" onclick="toggleIncidentBox('a')">
-                <span class="incident-box-title">A 級事件</span>
-                <span class="incident-box-count" id="incident-count-a">(0)</span>
-                <span class="incident-box-toggle">▼</span>
-              </div>
-              <div class="incident-box-preview" id="incident-preview-a">無事件</div>
-              <div class="incident-box-list" id="incident-list-a"></div>
-            </div>
-            <div class="incident-box level-b collapsed" id="incident-box-b">
-              <div class="incident-box-header" onclick="toggleIncidentBox('b')">
-                <span class="incident-box-title">B 級事件</span>
-                <span class="incident-box-count" id="incident-count-b">(0)</span>
-                <span class="incident-box-toggle">▼</span>
-              </div>
-              <div class="incident-box-preview" id="incident-preview-b">無事件</div>
-              <div class="incident-box-list" id="incident-list-b"></div>
-            </div>
+          <div class="section-header section-header-toggle" onclick="toggleInjectPanel()">
+            <span>Event Injection</span>
+            <span class="inject-toggle-icon" id="inject-toggle-icon">▼</span>
           </div>
-        </section>
-
-        <!-- Saturated Segments (飽和路段即時列表) -->
-        <section class="section card" id="dashboard-saturation-panel">
-          <div class="section-header">Saturated Segments</div>
-          <div class="dashboard-saturation-list" id="dashboard-saturation-list">
-            <div class="saturation-empty">目前無飽和路段</div>
+          <div class="inject-panel-content" id="inject-panel-content">
+            <form id="incident-inject-form"></form>
           </div>
         </section>
 
@@ -188,6 +186,29 @@
           <div class="saturation-empty">目前無飽和路段</div>
         </div>
       </aside>
+    </div>
+  </div>
+
+  <!-- Page: Reports (事件報告全覽) -->
+  <div class="page-content" id="page-reports" hidden>
+    <div class="reports-page-layout">
+      <!-- 左側：事件列表 -->
+      <aside class="reports-sidebar">
+        <div class="reports-sidebar-header">事件報告列表</div>
+        <div class="reports-event-list" id="reports-event-list">
+          <div class="reports-empty">尚無事件報告</div>
+        </div>
+      </aside>
+      <!-- 右側：報告詳情 -->
+      <main class="reports-main">
+        <div class="reports-main-header" id="reports-main-header">選擇事件查看報告</div>
+        <div class="reports-detail-content" id="reports-detail-content">
+          <div class="reports-placeholder">
+            <div class="reports-placeholder-icon">📄</div>
+            <div class="reports-placeholder-text">從左側選擇事件以查看完整報告</div>
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 
@@ -253,9 +274,10 @@
   <script src="/frontend/js/api.js"></script>
   <script src="/frontend/js/ws.js"></script>
   <script src="/frontend/vendor/chart.umd.js"></script>
-  <script src="/frontend/js/charts.js"></script>
+  <script src="/frontend/js/charts.js?v=chart-axis-visible-5"></script>
   <script src="/frontend/js/map.js"></script>
+  <script src="/frontend/js/geomap.js"></script>
   <script src="/frontend/js/chat-app.js"></script>
-  <script src="/frontend/js/app.js"></script>
+  <script src="/frontend/js/app.js?v=collapsible-right-sidebar-10"></script>
 </body>
 </html>

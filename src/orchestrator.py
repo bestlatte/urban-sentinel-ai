@@ -71,6 +71,7 @@ class ModuleGateway(Protocol):
     # SOP-5（號誌故障）需要用路網拓樸算受影響路口數（`routing.count_affected_intersections()`），
     # 警力人數=路口數×2，這個計算需要 bundle 才能做，之前完全沒傳進來，是 §5 這條 SOP 的
     # 人力派遣建議一直缺少具體人數的原因。
+    # [2026-08-01新增] `merged_incident_info` 參數：同路段多事件合併報告書所需資訊。
     def generate_report(
         self,
         incident: Incident,
@@ -79,6 +80,7 @@ class ModuleGateway(Protocol):
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]: ...
 
     def run_agent(
@@ -209,6 +211,7 @@ class StubGateway:
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]:
         report = (
             f"【交控建議書】事件 {incident.event_id}\n"
@@ -272,9 +275,10 @@ class LiveGateway:
         ete: EteEstimate,
         advisory: BedrockAdvisory | None,
         bundle: NormalizedDataBundle,
+        merged_incident_info: dict | None = None,
     ) -> tuple[str, Notification | None]:
         from src.reporting import generate_report
-        return generate_report(incident, sensing, route_plan, ete, advisory, bundle)
+        return generate_report(incident, sensing, route_plan, ete, advisory, bundle, merged_incident_info)
 
     def run_agent(
         self,
@@ -378,16 +382,36 @@ M1-M4。這是屬於「架構圖上畫了依賴注入，程式碼裡沒接線」
 def classify_incident(incident: Incident) -> dict:
     """回傳 {primary_sop, requires_rerouting, affected_source}。
 
-    對照表（m5-api-orchestrator-dashboard/design.md）：
-        Road_Collapse_Accident → SOP-2 → requires_rerouting=True
-        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False
-        Power_Failure          → SOP-5 → requires_rerouting=False
+    對照表（m5-api-orchestrator-dashboard/design.md + 擴充）：
+        Road_Collapse_Accident → SOP-2 → requires_rerouting=True   # 路面塌陷
+        Traffic_Accident       → SOP-2 → requires_rerouting=True   # 一般車禍
+        Vehicle_Fire           → SOP-2 → requires_rerouting=True   # 車輛火警
+        Crowd_Surge_Injury     → SOP-3 → requires_rerouting=False  # 人群推擠
+        Large_Event_Dispersal  → SOP-4 → requires_rerouting=False  # 大型活動散場
+        Power_Failure          → SOP-5 → requires_rerouting=False  # 號誌故障
+        Water_Main_Break       → SOP-2 → requires_rerouting=False  # 水管破裂（減速即可）
+        Debris_On_Road         → SOP-2 → requires_rerouting=False  # 路面掉落物（清除快）
         其他                    → None  → requires_rerouting=False
+
+    requires_rerouting 判定邏輯：
+    - True：事件會導致道路完全或大部分封閉，車流需要改道
+    - False：事件影響局部或短暫，減速/管制即可，不需大規模改道
+    
+    [2026-07-28擴充] 額外考慮 status + severity 組合：
+    - status=Closed + severity=Critical/High → 強制 requires_rerouting=True
     """
     type_map = {
+        # 需要路網重規劃的嚴重事件
         "Road_Collapse_Accident": ("SOP-2", True),
+        "Traffic_Accident": ("SOP-2", True),
+        "Vehicle_Fire": ("SOP-2", True),
+        # 人流相關（不需道路改道）
         "Crowd_Surge_Injury": ("SOP-3", False),
+        "Large_Event_Dispersal": ("SOP-4", False),
+        # 設備/環境問題
         "Power_Failure": ("SOP-5", False),
+        "Water_Main_Break": ("SOP-2", False),
+        "Debris_On_Road": ("SOP-2", False),
     }
 
     primary_sop, requires_rerouting = type_map.get(incident.type, (None, False))
@@ -520,6 +544,8 @@ class IncidentRecord:
     """七階段跑完（PUSH）後才有值；PLAN/EXECUTE 中間階段為 None。"""
     bundle_snapshot: NormalizedDataBundle | None = None
     """OPEN 當下的 as-of bundle 快照，供 What-if 分支重算時取用（見 simulate_scenario）。"""
+    sensing_result: SensingResult | None = None
+    """初次評估時的規則命中結果，供路線重規劃時重新生成報告書使用。"""
     route_replan_count: int = 0
     """該事件的路線重規劃次數。"""
     last_route_check_at: datetime | None = None
@@ -533,9 +559,90 @@ class GlobalState:
     """key=event_id。寫入：週期 PUSH 階段；移除：收到恢復訊號（Partial_Open等）。"""
     cycle_counter: int = 0
     """trace_id 流水號（行程內）。"""
+    resolved_incidents: dict[str, IncidentRecord] = field(default_factory=dict)
+    """已解除事件的歷史紀錄，供 Dashboard 顯示。"""
 
 
 _STATE = GlobalState()
+
+
+# ---------------------------------------------------------------------------
+# 情境1：同路段多事件合併 ETE 計算
+# ---------------------------------------------------------------------------
+
+_MULTI_INCIDENT_DELAY_MINUTES = 15
+"""每多一個同路段事件，增加的協調延遲（分鐘）。"""
+
+
+def get_same_segment_incidents(segment_id: str, exclude_event_id: str | None = None) -> list[IncidentRecord]:
+    """取得同一路段的所有活躍事件。"""
+    result = []
+    for event_id, record in _STATE.active_incidents.items():
+        if exclude_event_id and event_id == exclude_event_id:
+            continue
+        affected = record.incident.affected_road or record.incident.affected_segment
+        if affected == segment_id:
+            result.append(record)
+    return result
+
+
+def calculate_merged_ete(base_ete_minutes: int, same_segment_count: int) -> int:
+    """情境1：合併 ETE 計算。
+    
+    公式：合併 ETE = max(各事件ETE) + (事件數量 - 1) × 15分鐘
+    
+    Args:
+        base_ete_minutes: 基礎 ETE（最大值）
+        same_segment_count: 同路段事件總數（含自己）
+    
+    Returns:
+        合併後的 ETE 分鐘數
+    """
+    if same_segment_count <= 1:
+        return base_ete_minutes
+    
+    delay = (same_segment_count - 1) * _MULTI_INCIDENT_DELAY_MINUTES
+    return base_ete_minutes + delay
+
+
+def get_merged_incident_info(segment_id: str) -> dict | None:
+    """取得同路段事件的合併資訊。
+    
+    Returns:
+        {
+            "event_ids": [...],
+            "count": int,
+            "max_ete_minutes": int,
+            "merged_ete_minutes": int,
+            "descriptions": [...],
+        }
+        如果該路段只有一個事件或沒有事件，回傳 None。
+    """
+    incidents = get_same_segment_incidents(segment_id)
+    if len(incidents) <= 1:
+        return None
+    
+    event_ids = []
+    descriptions = []
+    max_ete = 0
+    
+    for record in incidents:
+        event_ids.append(record.incident.event_id)
+        descriptions.append(record.incident.description)
+        if record.decision_result and record.decision_result.ete:
+            ete = record.decision_result.ete.minutes
+            if ete > max_ete:
+                max_ete = ete
+    
+    merged_ete = calculate_merged_ete(max_ete, len(incidents))
+    
+    return {
+        "event_ids": event_ids,
+        "count": len(incidents),
+        "max_ete_minutes": max_ete,
+        "merged_ete_minutes": merged_ete,
+        "descriptions": descriptions,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -835,12 +942,19 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         trace_id=trace_id,
         incident=event,
         bundle_snapshot=bundle,
+        sensing_result=None,  # 稍後由 evaluate_rules 填入
     )
 
     # --- 2. FLAGS ---
     sensing = await asyncio.to_thread(GATEWAY.evaluate_rules, bundle, event)
     if sensing.multilingual_required:
         _STATE.multilingual = True
+    
+    # 保存 sensing_result 供路線重規劃時重新生成報告書使用
+    record = _STATE.active_incidents.get(event.event_id)
+    if record:
+        record.sensing_result = sensing
+    
     try:
         record_step(trace_id, "A2", "SET_FLAG", {"multilingual": _STATE.multilingual}, {})
     except Exception as e:
@@ -981,6 +1095,44 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         _dispatch_seq += 1
         await _broadcast_task_update(ws_broadcaster, trace_id, _dispatch_seq, "ete_done")
 
+    # ★ 情境1：同路段多事件合併 ETE
+    affected_seg = event.affected_road or event.affected_segment
+    same_segment_incidents = get_same_segment_incidents(affected_seg, exclude_event_id=event.event_id)
+    merged_incident_info = None
+    
+    if same_segment_incidents and ete is not None:
+        # 有其他同路段事件，需要計算合併 ETE
+        # 找出所有同路段事件中最大的 ETE
+        all_etes = [ete.minutes]
+        for other_record in same_segment_incidents:
+            if other_record.decision_result and other_record.decision_result.ete:
+                all_etes.append(other_record.decision_result.ete.minutes)
+        
+        max_ete = max(all_etes)
+        total_count = len(same_segment_incidents) + 1  # 包含自己
+        merged_ete = calculate_merged_ete(max_ete, total_count)
+        
+        logger.info(f"[同路段事件合併] {event.event_id} 與 {len(same_segment_incidents)} 個事件同路段，"
+                    f"原始 ETE={ete.minutes}，最大 ETE={max_ete}，合併後={merged_ete} 分鐘")
+        
+        # 更新 ETE
+        ete = EteEstimate(
+            minutes=merged_ete,
+            recovery_at=ete.recovery_at,  # 暫時保持原值，之後可以重算
+            formula=f"{ete.formula} → 合併計算: max({max_ete}) + ({total_count}-1)×15 = {merged_ete}",
+            base_clearance=ete.base_clearance,
+            average_saturation=ete.average_saturation,
+        )
+        
+        # 記錄合併資訊
+        merged_incident_info = {
+            "event_ids": [event.event_id] + [r.incident.event_id for r in same_segment_incidents],
+            "count": total_count,
+            "max_ete_minutes": max_ete,
+            "merged_ete_minutes": merged_ete,
+            "descriptions": [event.description] + [r.incident.description for r in same_segment_incidents],
+        }
+
     # [2026-08-01 移除：決策週期不再呼叫 GATEWAY.run_agent()]
     #
     # 這裡原本會呼叫 W1 Agent 取得 `BedrockAdvisory`。移除的理由是實測結果：
@@ -1012,7 +1164,7 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         try:
             report_text, notification = await asyncio.to_thread(
                 GATEWAY.generate_report, event, sensing, route_plan, ete, advisory, bundle
-            )
+            , merged_incident_info)
         except Exception as e:
             logger.warning(f"generate_report 失敗: {e}")
         if report_text is None:
@@ -1082,6 +1234,7 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         duration_ms=elapsed,
         is_simulated=is_simulated,
         projected_risks=projected_risks,
+        merged_incident_info=merged_incident_info,
     )
 
     # 更新 GlobalState
@@ -1304,6 +1457,21 @@ class RouteMonitorResult:
     """重規劃後的新 DecisionResult。"""
 
 
+@dataclass
+class ResolveResult:
+    """resolve_incident() 的回傳結果。"""
+    event_id: str
+    freed_segment: str | None
+    """被釋放的路段 ID。"""
+    affected_incidents: list[str]
+    """受影響並重新規劃的其他事件 ID 清單。"""
+    resolved_record: IncidentRecord
+    """移到 resolved_incidents 的完整紀錄。"""
+    resolved_at: datetime
+    replan_results: list[RouteMonitorResult] = field(default_factory=list)
+    """每個受影響事件的重規劃結果。"""
+
+
 def check_and_replan_routes(
     event_id: str,
     as_of: datetime,
@@ -1361,8 +1529,33 @@ def check_and_replan_routes(
         RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
     )
 
-    # 更新 decision_result 的 routes
+    # 更新 decision_result 的 routes 以及重新生成報告書與簡訊
     old_decision = record.decision_result
+    
+    # 重新生成報告書與簡訊（路線改了，報告內容也要同步更新）
+    # 需要 sensing 資訊，從原 decision 取用（sensing 在初次評估時已存入 record）
+    new_report = old_decision.control_center_report
+    new_notification = old_decision.notifications
+    degraded = list(old_decision.degraded)
+    
+    if record.sensing_result is not None:
+        try:
+            new_report, new_notification = GATEWAY.generate_report(
+                incident=record.incident,
+                sensing=record.sensing_result,
+                route_plan=new_route_plan,
+                ete=old_decision.ete,
+                advisory=None,  # 重規劃時不重新呼叫 RAG，用原有的 SOP 命中
+                bundle=bundle,
+            )
+            logger.info(f"[路線監測] {event_id} 報告書與簡訊已重新生成")
+        except Exception as e:
+            logger.warning(f"[路線監測] {event_id} 報告書重新生成失敗: {e}，保留原報告")
+            if "C1_FAILED" not in degraded:
+                degraded.append("C1_REPLAN_FAILED")
+    else:
+        logger.warning(f"[路線監測] {event_id} 缺少 sensing_result，無法重新生成報告書")
+    
     new_decision = DecisionResult(
         trace_id=old_decision.trace_id,
         triggered_by=old_decision.triggered_by,
@@ -1370,9 +1563,9 @@ def check_and_replan_routes(
         incident=old_decision.incident,
         routes=new_route_plan,
         ete=old_decision.ete,
-        control_center_report=old_decision.control_center_report,
-        notifications=old_decision.notifications,
-        degraded=old_decision.degraded,
+        control_center_report=new_report,
+        notifications=new_notification,
+        degraded=degraded,
         duration_ms=old_decision.duration_ms,
         is_simulated=old_decision.is_simulated,
     )
@@ -1402,3 +1595,272 @@ def monitor_all_active_routes(as_of: datetime) -> list[RouteMonitorResult]:
         if result is not None and result.replanned:
             results.append(result)
     return results
+
+
+# ---------------------------------------------------------------------------
+# 事件解除與連鎖重規劃
+# ---------------------------------------------------------------------------
+
+
+def _cascade_replan_after_resolve(
+    freed_segment: str,
+    resolved_event_id: str,
+    as_of: datetime,
+) -> list[RouteMonitorResult]:
+    """事件解除後的連鎖重規劃。
+
+    觸發重規劃的條件（任一符合即重規劃）：
+    1. freed_segment 在該事件的 excluded 清單中（reason_code="CLOSED"）
+    2. freed_segment 在該事件的 candidates 清單中
+    3. freed_segment 在該事件事故路段的 alternatives 中
+    4. ★ 新增：兩個事件影響同一路段（同路段多事件情境）
+
+    Args:
+        freed_segment: 被解除事件釋放的路段 ID
+        resolved_event_id: 被解除的事件 ID（避免對它自己做重規劃）
+        as_of: 重規劃的時間點
+
+    Returns:
+        所有執行過重規劃的結果清單
+    """
+    results: list[RouteMonitorResult] = []
+
+    for event_id, record in list(_STATE.active_incidents.items()):
+        if event_id == resolved_event_id:
+            continue  # 跳過已解除的事件
+
+        if record.decision_result is None:
+            logger.info(f"[連鎖重規劃] {event_id} 尚無 decision_result，跳過")
+            continue
+
+        routes = record.decision_result.routes
+        
+        # ★ 條件 4：兩個事件影響同一路段
+        other_affected_seg = record.incident.affected_road or record.incident.affected_segment
+        is_same_segment = (other_affected_seg == freed_segment)
+        
+        if is_same_segment:
+            logger.info(
+                f"[連鎖重規劃] {resolved_event_id} 解除後，{event_id} 需要重規劃 "
+                f"(reason=SAME_SEGMENT，兩事件都影響 {freed_segment})"
+            )
+            # 同路段事件：即使沒有路線規劃，也可能需要重算 ETE 等
+            result = _force_replan_routes(event_id, as_of, ["SAME_SEGMENT"])
+            if result is not None:
+                results.append(result)
+                if result.replanned:
+                    logger.info(f"[連鎖重規劃] {event_id} 路線已更新: {result.old_primary} → {result.new_primary}")
+            continue
+
+        if routes is None:
+            # 該事件本來就不需要路網規劃（如 SOP-3/5），且不是同路段事件
+            continue
+
+        # 檢查條件 1：freed_segment 是否在 excluded 清單中（reason_code="CLOSED"）
+        was_blocked_by_resolved = any(
+            exc.segment_id == freed_segment and exc.reason_code == "CLOSED"
+            for exc in (routes.excluded or [])
+        )
+
+        # 檢查條件 2：freed_segment 是否為該事件原本的候選路線（在 candidates 中）
+        is_potential_alternative = any(
+            c.segment_id == freed_segment
+            for c in (routes.candidates or [])
+        )
+
+        # 檢查條件 3：freed_segment 是否為該事件事故路段的 alternatives
+        bundle = GATEWAY.load_data()
+        segment_map = {seg.segment_id: seg for seg in bundle.road_network}
+        affected_segment_data = segment_map.get(other_affected_seg)
+        is_in_alternatives = (
+            affected_segment_data is not None
+            and freed_segment in affected_segment_data.alternatives
+        )
+
+        should_replan = was_blocked_by_resolved or is_potential_alternative or is_in_alternatives
+
+        if not should_replan:
+            logger.debug(f"[連鎖重規劃] {event_id} 不需重規劃（freed={freed_segment} 與該事件無關）")
+            continue
+
+        reason = []
+        if was_blocked_by_resolved:
+            reason.append("CLOSED_CLEARED")
+        if is_potential_alternative:
+            reason.append("CANDIDATE_AVAILABLE")
+        if is_in_alternatives:
+            reason.append("ALTERNATIVE_AVAILABLE")
+
+        logger.info(
+            f"[連鎖重規劃] {resolved_event_id} 解除後，{event_id} 需要重規劃 "
+            f"(freed={freed_segment}, reason={reason})"
+        )
+
+        # 強制重新規劃
+        result = _force_replan_routes(event_id, as_of, reason)
+
+        if result is not None:
+            results.append(result)
+            if result.replanned:
+                logger.info(f"[連鎖重規劃] {event_id} 路線已更新: {result.old_primary} → {result.new_primary}")
+
+    return results
+
+
+def _force_replan_routes(
+    event_id: str,
+    as_of: datetime,
+    reason: list[str],
+) -> RouteMonitorResult | None:
+    """強制重新規劃指定事件的路線（用於事件解除後的連鎖重規劃）。
+    
+    與 check_and_replan_routes 不同，這個函式不檢查路線是否「失效」，
+    而是直接重新規劃，因為可能有更好的選項出現。
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None or record.decision_result is None:
+        return None
+
+    old_routes = record.decision_result.routes
+    if old_routes is None:
+        return None
+
+    old_primary = old_routes.primary.segment_id if old_routes.primary else None
+    old_secondary = old_routes.secondary.segment_id if old_routes.secondary else None
+
+    # 取得當前 bundle
+    bundle = GATEWAY.load_data()
+
+    # 重新規劃路線
+    new_route_plan = GATEWAY.plan_routes(
+        RouteRequest(incident=record.incident, bundle=bundle, as_of=as_of)
+    )
+
+    new_primary = new_route_plan.primary.segment_id if new_route_plan.primary else None
+    new_secondary = new_route_plan.secondary.segment_id if new_route_plan.secondary else None
+
+    # 比較是否有變化
+    route_changed = (old_primary != new_primary) or (old_secondary != new_secondary)
+
+    if not route_changed:
+        logger.info(f"[連鎖重規劃] {event_id} 路線未變更（{old_primary} 仍是最佳選擇）")
+        return RouteMonitorResult(
+            event_id=event_id,
+            replanned=False,
+            old_primary=old_primary,
+            new_primary=new_primary,
+            old_secondary=old_secondary,
+            new_secondary=new_secondary,
+            invalid_reasons={r: "REPLAN_REQUESTED" for r in reason},
+        )
+
+    logger.info(f"[連鎖重規劃] {event_id} 路線有變化：{old_primary} → {new_primary}")
+
+    # 更新 decision_result
+    old_decision = record.decision_result
+    degraded = list(old_decision.degraded)
+
+    # 重新生成報告書與簡訊
+    new_report = old_decision.control_center_report
+    new_notification = old_decision.notifications
+
+    if record.sensing_result is not None:
+        try:
+            new_report, new_notification = GATEWAY.generate_report(
+                incident=record.incident,
+                sensing=record.sensing_result,
+                route_plan=new_route_plan,
+                ete=old_decision.ete,
+                advisory=None,
+                bundle=bundle,
+            )
+            logger.info(f"[連鎖重規劃] {event_id} 報告書已重新生成")
+        except Exception as e:
+            logger.warning(f"[連鎖重規劃] {event_id} 報告書重新生成失敗: {e}")
+            if "C1_REPLAN_FAILED" not in degraded:
+                degraded.append("C1_REPLAN_FAILED")
+
+    new_decision = DecisionResult(
+        trace_id=old_decision.trace_id,
+        triggered_by=old_decision.triggered_by,
+        level=old_decision.level,
+        incident=old_decision.incident,
+        routes=new_route_plan,
+        ete=old_decision.ete,
+        control_center_report=new_report,
+        notifications=new_notification,
+        degraded=degraded,
+        duration_ms=old_decision.duration_ms,
+        is_simulated=old_decision.is_simulated,
+    )
+    record.decision_result = new_decision
+    record.route_replan_count += 1
+
+    return RouteMonitorResult(
+        event_id=event_id,
+        replanned=True,
+        old_primary=old_primary,
+        new_primary=new_primary,
+        old_secondary=old_secondary,
+        new_secondary=new_secondary,
+        invalid_reasons={r: "SEGMENT_FREED" for r in reason},
+        new_decision_result=new_decision,
+    )
+
+
+def resolve_incident(event_id: str, new_status: str = "Resolved") -> ResolveResult | None:
+    """解除事件的核心邏輯。
+
+    1. 從 active_incidents 取出並移除
+    2. 更新事件狀態
+    3. 保存到 resolved_incidents（歷史紀錄）
+    4. 執行連鎖重規劃
+    5. 回傳完整結果
+
+    Args:
+        event_id: 要解除的事件 ID
+        new_status: 新狀態，預設 "Resolved"，也可以是 "Partial_Open" 等
+
+    Returns:
+        ResolveResult 或 None（如果事件不存在）
+    """
+    record = _STATE.active_incidents.get(event_id)
+    if record is None:
+        logger.warning(f"[事件解除] {event_id} 不存在於 active_incidents")
+        return None
+
+    # 記錄被釋放的路段
+    freed_segment = record.incident.affected_road or record.incident.affected_segment
+    resolved_at = datetime.now(_TZ_TAIPEI)
+
+    # 更新事件狀態
+    record.incident.status = new_status
+
+    # 從 active_incidents 移除
+    del _STATE.active_incidents[event_id]
+
+    # 保存到 resolved_incidents（歷史紀錄）
+    _STATE.resolved_incidents[event_id] = record
+
+    logger.info(f"[事件解除] {event_id} 已解除，釋放路段 {freed_segment}，狀態更新為 {new_status}")
+
+    # 執行連鎖重規劃
+    replan_results: list[RouteMonitorResult] = []
+    if freed_segment:
+        replan_results = _cascade_replan_after_resolve(freed_segment, event_id, resolved_at)
+
+    affected_incidents = [r.event_id for r in replan_results if r.replanned]
+
+    return ResolveResult(
+        event_id=event_id,
+        freed_segment=freed_segment,
+        affected_incidents=affected_incidents,
+        resolved_record=record,
+        resolved_at=resolved_at,
+        replan_results=replan_results,
+    )
+
+
+def get_resolved_incidents() -> dict[str, IncidentRecord]:
+    """取得已解除事件的歷史紀錄，供 Dashboard 或歷史查詢使用。"""
+    return _STATE.resolved_incidents.copy()
