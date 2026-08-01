@@ -804,10 +804,15 @@ async def handle_incident(event: Incident, ws_broadcaster=None) -> DecisionResul
         or any(c.provenance != DataProvenance.PROVIDED for c in bundle.crowd)
     )
 
+    # 計算事件影響路段的等級（不是全市最高等級）
+    from src.rules import determine_level_for_segment
+    affected_segment_id = event.affected_road or event.affected_segment
+    incident_level = determine_level_for_segment(bundle, affected_segment_id, event.timestamp)
+
     decision_result = DecisionResult(
         trace_id=trace_id,
         triggered_by=triggered_by_list,
-        level=sensing.traffic_level if sensing.traffic_level != "normal" else None,
+        level=incident_level if incident_level != "normal" else None,
         incident=event,
         routes=route_plan,
         ete=ete,
