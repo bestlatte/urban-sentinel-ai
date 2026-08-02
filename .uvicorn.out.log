@@ -1129,3 +1129,4 @@ INFO:     127.0.0.1:51410 - "GET /api/incidents?as_of=2026-05-20T15%3A26%3A00.00
 INFO:     127.0.0.1:51410 - "GET /api/incidents?as_of=2026-05-20T15%3A27%3A00.000Z HTTP/1.1" 200 OK
 INFO:     127.0.0.1:51410 - "GET /api/incidents?as_of=2026-05-20T15%3A28%3A00.000Z HTTP/1.1" 200 OK
 INFO:     127.0.0.1:51410 - "POST /api/simulation/pause HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63139 - "GET /favicon.ico HTTP/1.1" 404 Not Found

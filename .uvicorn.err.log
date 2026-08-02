@@ -502,3 +502,5 @@ INFO:     connection open
 09:36:06 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
 09:36:07 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
 09:36:08 [INFO] src.orchestrator: [路線監測] TPE_2026_ACC_001 路線失效，原因: {'RD_TPE_004': 'SATURATED_0.98', 'RD_TPE_005': 'SATURATED_0.92'}，執行重規劃
+INFO:     127.0.0.1:49675 - "WebSocket /ws" [accepted]
+INFO:     connection open
